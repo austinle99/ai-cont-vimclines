@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { askChat, executeChatAction } from "@/app/action";
+import { executeChatAction } from "@/app/action";
 
 type Message = {
   role: "user" | "assistant";
@@ -25,15 +25,26 @@ export default function Chatbot() {
     setIsProcessing(true);
 
     try {
-      const response = await askChat(userMessage);
+      // Use API route instead of server action
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: userMessage })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Chat request failed');
+      }
+      
+      const data = await response.json();
       
       // Check if this is an action that needs to be executed
-      if (response.action) {
+      if (data.action) {
         // Show the initial response
-        setMsgs(m => [...m, { role: "assistant", text: response.message, isAction: true }]);
+        setMsgs(m => [...m, { role: "assistant", text: data.message, isAction: true }]);
         
-        // Execute the action
-        const actionResult = await executeChatAction(response.action, response.actionData);
+        // Execute the action using server action
+        const actionResult = await executeChatAction(data.action, data.actionData);
         
         // Show the action result
         setMsgs(m => [...m, { 
@@ -43,7 +54,7 @@ export default function Chatbot() {
         }]);
       } else {
         // Regular informational response
-        setMsgs(m => [...m, { role: "assistant", text: response.message }]);
+        setMsgs(m => [...m, { role: "assistant", text: data.message }]);
       }
     } catch (error) {
       console.error("Chat error:", error);
