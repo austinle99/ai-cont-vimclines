@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as XLSX from 'xlsx';
-import { prisma } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
+    // Dynamic imports to avoid build-time issues
+    const XLSX = await import('xlsx');
+    const { prisma } = await import('@/lib/db');
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const table = formData.get('table') as string;
