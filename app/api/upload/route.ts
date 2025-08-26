@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
         break;
 
       case 'kpi':
-        result = await prisma.kPI.createMany({
+        result = await prisma.KPI.createMany({
           data: data.map((row: any) => ({
             utilization: String(row.utilization || ''),
             storageCost: String(row.storageCost || ''),
