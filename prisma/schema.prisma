@@ -1,0 +1,60 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model KPI {
+  id           Int     @id @default(autoincrement())
+  utilization  String
+  storageCost  String
+  dwellTime    String
+  approvalRate String
+}
+
+model Inventory {
+  id    Int     @id @default(autoincrement())
+  port  String
+  type  String
+  stock Int
+  @@index([port, type])
+}
+
+model Booking {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @default(now())
+  origin      String
+  destination String
+  size        String
+  qty         Int
+  customer    String?
+  status      String?
+  @@index([origin, destination, size])
+}
+
+model Proposal {
+  id        String   @id
+  route     String
+  size      String
+  qty       Int
+  estCost   Float?
+  benefit   Float?
+  reason    String?
+  status    String   // draft/approved/rejected
+  createdAt DateTime @default(now())
+}
+
+model Alert {
+  id          String   @id
+  level       String
+  message     String
+  location    String?
+  severity    String?
+  description String?
+  status      String   @default("active") // active/resolved/ignored
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+}
