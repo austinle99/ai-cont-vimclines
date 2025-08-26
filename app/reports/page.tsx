@@ -1,14 +1,74 @@
-import { prisma } from "@/lib/db";
+"use client";
+
+import { useState, useEffect } from "react";
 import { importExcel, recomputeProposals, generateAlerts } from "@/app/action";
-import { revalidatePath } from "next/cache";
 import Sidebar from "@/components/Sidebar";
 import Chatbot from "@/components/Chatbot";
 
-export default async function Page() {
-  const [kpi, alerts] = await Promise.all([
-    prisma.kPI.findFirst(),
-    prisma.alert.findMany({ where: { status: "active" }, orderBy: { createdAt: "desc" } })
-  ]);
+interface KPI {
+  id: number;
+  utilization: string;
+  storageCost: string;
+  dwellTime: string;
+  approvalRate: string;
+}
+
+interface Alert {
+  id: string;
+  level: string;
+  message: string;
+  createdAt: Date;
+  location?: string | null;
+  severity?: string | null;
+  description?: string | null;
+  status: string;
+  resolvedAt?: Date | null;
+}
+
+export default function Page() {
+  const [kpi, setKpi] = useState<KPI | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [kpiResponse, alertsResponse] = await Promise.all([
+          fetch('/api/kpi'),
+          fetch('/api/alerts')
+        ]);
+        
+        const kpiData = await kpiResponse.json();
+        const alertsData = await alertsResponse.json();
+        
+        setKpi(kpiData);
+        setAlerts(alertsData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setKpi(null);
+        setAlerts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="h-screen flex">
+        <Sidebar current="reports" />
+        <main className="flex-1 overflow-y-auto p-4 space-y-4">
+          <h2 className="text-xl font-semibold">Báo cáo</h2>
+          <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-6 text-center text-neutral-400">
+            <div>Loading reports data...</div>
+          </div>
+        </main>
+        <Chatbot />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex">
@@ -19,19 +79,39 @@ export default async function Page() {
         <form action={importExcel} className="bg-neutral-900 rounded-xl border border-neutral-800 p-4 flex items-center gap-4">
           <input required name="file" type="file" accept=".xlsx,.xls" className="text-sm" />
           <button type="submit" className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700">Upload Excel</button>
-          <button formAction={async()=>{ "use server"; await recomputeProposals(); }} className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700">Recompute</button>
-          <button formAction={async()=>{ "use server"; await generateAlerts(); revalidatePath("/notifications"); revalidatePath("/reports"); }} className="px-3 py-2 rounded bg-orange-600 hover:bg-orange-500">Generate Alerts</button>
+          <button 
+            onClick={async () => {
+              await recomputeProposals();
+              window.location.reload();
+            }}
+            className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700"
+            type="button"
+          >
+            Recompute
+          </button>
+          <button 
+            onClick={async () => {
+              await generateAlerts();
+              window.location.reload();
+            }}
+            className="px-3 py-2 rounded bg-orange-600 hover:bg-orange-500"
+            type="button"
+          >
+            Generate Alerts
+          </button>
         </form>
 
         <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
           <div className="text-sm text-neutral-400 mb-2">Tổng hợp KPI báo cáo</div>
-          {kpi && (
+          {kpi ? (
             <ul className="space-y-1 text-sm">
               <li>Utilization: <b>{kpi.utilization}</b></li>
               <li>Storage cost: <b>{kpi.storageCost}</b></li>
               <li>Dwell time: <b>{kpi.dwellTime}</b></li>
               <li>Approval rate: <b>{kpi.approvalRate}</b></li>
             </ul>
+          ) : (
+            <div className="text-neutral-400 text-sm">No KPI data available</div>
           )}
         </div>
 
