@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No data found in Excel file' }, { status: 400 });
     }
 
-    let result;
+    let result: { count: number };
     
     // Import based on table selection
     switch (table) {
@@ -41,8 +41,7 @@ export async function POST(request: NextRequest) {
             port: String(row.port || ''),
             type: String(row.type || ''),
             stock: parseInt(row.stock) || 0
-          })),
-          skipDuplicates: true
+          }))
         });
         break;
 
@@ -56,20 +55,18 @@ export async function POST(request: NextRequest) {
             qty: parseInt(row.qty) || 0,
             customer: row.customer ? String(row.customer) : null,
             status: row.status ? String(row.status) : null
-          })),
-          skipDuplicates: true
+          }))
         });
         break;
 
       case 'kpi':
-        result = await prisma.KPI.createMany({
+        result = await prisma.kPI.createMany({
           data: data.map((row: any) => ({
             utilization: String(row.utilization || ''),
             storageCost: String(row.storageCost || ''),
             dwellTime: String(row.dwellTime || ''),
             approvalRate: String(row.approvalRate || '')
-          })),
-          skipDuplicates: true
+          }))
         });
         break;
 
