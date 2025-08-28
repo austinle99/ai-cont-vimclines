@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     // Dynamic imports to avoid build-time issues
-    const XLSX = await import('xlsx');
+    const ExcelJS = await import('exceljs');
     const { prisma } = await import('@/lib/db');
 
     const formData = await request.formData();
@@ -22,10 +22,40 @@ export async function POST(request: NextRequest) {
     }
 
     // Read Excel file
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const workbook = XLSX.read(buffer);
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(worksheet);
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(arrayBuffer);
+    const worksheet = workbook.getWorksheet(1);
+    if (!worksheet) {
+      return NextResponse.json({ error: 'No worksheet found' }, { status: 400 });
+    }
+    
+    // Convert worksheet to JSON
+    const data: any[] = [];
+    const headers: string[] = [];
+    
+    // Get headers from first row
+    worksheet.getRow(1).eachCell((cell, colNumber) => {
+      headers[colNumber - 1] = String(cell.value);
+    });
+    
+    // Get data from remaining rows
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      const rowData: any = {};
+      
+      row.eachCell((cell, colNumber) => {
+        const header = headers[colNumber - 1];
+        if (header) {
+          rowData[header] = cell.value;
+        }
+      });
+      
+      // Only add row if it has data
+      if (Object.keys(rowData).length > 0) {
+        data.push(rowData);
+      }
+    }
 
     if (data.length === 0) {
       return NextResponse.json({ error: 'No data found in Excel file' }, { status: 400 });

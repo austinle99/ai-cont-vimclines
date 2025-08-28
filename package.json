@@ -11,13 +11,14 @@
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.1",
     "@prisma/client": "^6.14.0",
     "@types/react-dom": "^19.1.7",
+    "exceljs": "^4.4.0",
     "multer": "^2.0.2",
-    "next": "14.2.10",
+    "next": "^14.2.32",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

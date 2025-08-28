@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/db";
 import { getSafety } from "@/lib/safetyStock";
-import * as XLSX from "xlsx";
+import * as ExcelJS from "exceljs";
 import { revalidatePath } from "next/cache";
 
 // ---- Helpers ----
@@ -56,11 +56,46 @@ function computeProposals(inventory: {port:string; type:string; stock:number}[],
 export async function importExcel(formData: FormData) {
   const file = formData.get("file") as File | null;
   if (!file) throw new Error("Thiếu file Excel");
-  const buf = Buffer.from(await file.arrayBuffer());
-  const wb = XLSX.read(buf, { type:"buffer" });
+  const arrayBuffer = await file.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(arrayBuffer);
 
-  const invRaw = XLSX.utils.sheet_to_json<any>(wb.Sheets["inventory_snapshot"] || {});
-  const bkRaw  = XLSX.utils.sheet_to_json<any>(wb.Sheets["bookings_demand"] || {});
+  // Helper function to convert worksheet to JSON
+  const sheetToJson = (worksheetName: string) => {
+    const worksheet = wb.getWorksheet(worksheetName);
+    if (!worksheet) return [];
+    
+    const data: any[] = [];
+    const headers: string[] = [];
+    
+    // Get headers from first row
+    worksheet.getRow(1).eachCell((cell, colNumber) => {
+      headers[colNumber - 1] = String(cell.value);
+    });
+    
+    // Get data from remaining rows
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      const rowData: any = {};
+      
+      row.eachCell((cell, colNumber) => {
+        const header = headers[colNumber - 1];
+        if (header) {
+          rowData[header] = cell.value;
+        }
+      });
+      
+      // Only add row if it has data
+      if (Object.keys(rowData).length > 0) {
+        data.push(rowData);
+      }
+    }
+    
+    return data;
+  };
+
+  const invRaw = sheetToJson("inventory_snapshot");
+  const bkRaw = sheetToJson("bookings_demand");
 
   const inv = invRaw.map(r => ({
     port: r.port || r.depot || r.depot_code || "",
