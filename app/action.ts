@@ -529,3 +529,25 @@ export async function executeChatAction(action: string, actionData?: any) {
   
   return { success: false, message: "Tham số hành động không hợp lệ." };
 }
+
+export async function create(formData: FormData) {
+  const content = formData.get("content") as string;
+  
+  if (!content || content.trim() === "") {
+    throw new Error("Comment content is required");
+  }
+  
+  await prisma.comment.create({
+    data: {
+      content: content.trim()
+    }
+  });
+  
+  revalidatePath("/comments");
+}
+
+export async function getComments() {
+  return await prisma.comment.findMany({
+    orderBy: { createdAt: "desc" }
+  });
+}

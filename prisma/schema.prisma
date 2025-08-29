@@ -58,3 +58,9 @@ model Alert {
   createdAt   DateTime @default(now())
   resolvedAt  DateTime?
 }
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdAt DateTime @default(now())
+}
