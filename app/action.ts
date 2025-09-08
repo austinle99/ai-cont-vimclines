@@ -1,9 +1,14 @@
 "use server";
 
-import { prisma } from "@/lib/db";
 import { getSafety } from "@/lib/safetyStock";
 import * as ExcelJS from "exceljs";
 import { revalidatePath } from "next/cache";
+
+// Dynamic prisma import to avoid build issues
+async function getPrisma() {
+  const { prisma } = await import("@/lib/db");
+  return prisma;
+}
 
 // ---- Helpers ----
 function computeProposals(inventory: {port:string; type:string; stock:number}[],
@@ -113,6 +118,7 @@ export async function importExcel(formData: FormData) {
   })).filter(r => r.origin && r.destination && r.size);
 
   // upsert (simple: truncate & insert)
+  const prisma = await getPrisma();
   await prisma.$transaction([
     prisma.inventory.deleteMany({}),
     prisma.booking.deleteMany({})
@@ -132,6 +138,7 @@ export async function importExcel(formData: FormData) {
 }
 
 export async function recomputeProposals() {
+  const prisma = await getPrisma();
   const [inventory, bookings] = await Promise.all([
     prisma.inventory.findMany(),
     prisma.booking.findMany()
@@ -153,6 +160,7 @@ export async function recomputeProposals() {
 }
 
 export async function approveProposal(id: string) {
+  const prisma = await getPrisma();
   await prisma.proposal.update({ where: { id }, data: { status: "approved" } });
   await recomputeKPI();
   await generateAlerts();
@@ -162,6 +170,7 @@ export async function approveProposal(id: string) {
 }
 
 export async function rejectProposal(id: string) {
+  const prisma = await getPrisma();
   await prisma.proposal.update({ where: { id }, data: { status: "rejected" } });
   await recomputeKPI();
   await generateAlerts();
@@ -171,6 +180,7 @@ export async function rejectProposal(id: string) {
 }
 
 export async function recomputeKPI() {
+  const prisma = await getPrisma();
   const [kpi, proposals] = await Promise.all([
     prisma.kPI.findFirst(),
     prisma.proposal.findMany()
@@ -189,6 +199,7 @@ export async function recomputeKPI() {
 
 // ---- Alert System ----
 export async function generateAlerts() {
+  const prisma = await getPrisma();
   const inventory = await prisma.inventory.findMany();
   const bookings = await prisma.booking.findMany();
   const proposals = await prisma.proposal.findMany();
@@ -285,6 +296,7 @@ export async function generateAlerts() {
 
 export async function resolveAlert(formData: FormData) {
   const id = formData.get("id") as string;
+  const prisma = await getPrisma();
   await prisma.alert.update({
     where: { id },
     data: {
@@ -297,6 +309,7 @@ export async function resolveAlert(formData: FormData) {
 
 export async function ignoreAlert(formData: FormData) {
   const id = formData.get("id") as string;
+  const prisma = await getPrisma();
   await prisma.alert.update({
     where: { id },
     data: {
@@ -309,6 +322,7 @@ export async function ignoreAlert(formData: FormData) {
 
 // Enhanced Chat Assistant with Action Capabilities
 export async function askChat(q: string): Promise<{ message: string; action?: string; actionData?: any }> {
+  const prisma = await getPrisma();
   const [kpi, inv, props, alerts, bookings] = await Promise.all([
     prisma.kPI.findFirst(),
     prisma.inventory.findMany(),
@@ -505,12 +519,14 @@ export async function executeChatAction(action: string, actionData?: any) {
       
       case "recompute_proposals":
         await recomputeProposals();
+        const prisma = await getPrisma();
         const newProposals = await prisma.proposal.count({ where: { status: "draft" } });
         return { success: true, message: `🔄 Đã tính toán lại đề xuất! Tạo ra ${newProposals} khuyến nghị chuyển kho mới.` };
       
       case "resolve_alert":
         if (actionData?.id) {
-          await prisma.alert.update({
+          const prisma2 = await getPrisma();
+          await prisma2.alert.update({
             where: { id: actionData.id },
             data: { status: "resolved", resolvedAt: new Date() }
           });
@@ -537,6 +553,7 @@ export async function create(formData: FormData) {
     throw new Error("Comment content is required");
   }
   
+  const prisma = await getPrisma();
   await prisma.comment.create({
     data: {
       content: content.trim()
@@ -547,6 +564,7 @@ export async function create(formData: FormData) {
 }
 
 export async function getComments() {
+  const prisma = await getPrisma();
   return await prisma.comment.findMany({
     orderBy: { createdAt: "desc" }
   });
