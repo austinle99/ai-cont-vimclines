@@ -29,6 +29,8 @@ export default function Page() {
   const [kpi, setKpi] = useState<KPI | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -55,6 +57,46 @@ export default function Page() {
     fetchData();
   }, []);
 
+  const handleExcelUpload = async () => {
+    const fileInput = document.getElementById('excel-file') as HTMLInputElement;
+    const file = fileInput?.files?.[0];
+    
+    if (!file) {
+      setUploadMessage("Please select a file first");
+      return;
+    }
+
+    setUploading(true);
+    setUploadMessage('');
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/upload-excel', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        setUploadMessage(`✅ ${result.message}\n📊 Data processed successfully!\n🤖 AI suggestions generated and ready in chatbot`);
+        
+        // Refresh the page data to show new suggestions
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      } else {
+        setUploadMessage(`❌ Error: ${result.error}${result.details ? '\nDetails: ' + result.details : ''}`);
+      }
+    } catch (error) {
+      setUploadMessage(`❌ Upload failed: ${error}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-screen flex">
@@ -76,30 +118,70 @@ export default function Page() {
       <main className="flex-1 overflow-y-auto p-4 space-y-4">
         <h2 className="text-xl font-semibold">Báo cáo</h2>
 
-        <form action={importExcel} className="bg-neutral-900 rounded-xl border border-neutral-800 p-4 flex items-center gap-4">
-          <input required name="file" type="file" accept=".xlsx,.xls" className="text-sm" />
-          <button type="submit" className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700">Upload Excel</button>
-          <button 
-            onClick={async () => {
-              await recomputeProposals();
-              window.location.reload();
-            }}
-            className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700"
-            type="button"
-          >
-            Recompute
-          </button>
-          <button 
-            onClick={async () => {
-              await generateAlerts();
-              window.location.reload();
-            }}
-            className="px-3 py-2 rounded bg-orange-600 hover:bg-orange-500"
-            type="button"
-          >
-            Generate Alerts
-          </button>
-        </form>
+        <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
+          <h3 className="text-lg font-semibold mb-3">📊 Upload Excel Data</h3>
+          <div className="flex items-center gap-4 mb-4">
+            <input 
+              id="excel-file" 
+              type="file" 
+              accept=".xlsx,.xls" 
+              className="text-sm"
+            />
+            <button 
+              onClick={handleExcelUpload}
+              disabled={uploading}
+              className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-600 text-white font-medium"
+            >
+              {uploading ? 'Processing...' : 'Upload & Generate Suggestions'}
+            </button>
+          </div>
+          <div className="text-xs text-neutral-400 mb-2">Supported Excel formats:</div>
+          <div className="text-xs text-neutral-500">
+            <strong>Option 1 - Standard sheets:</strong><br/>
+            • <strong>inventory</strong> sheet: port, type, stock<br/>
+            • <strong>booking</strong> sheet: date, origin, destination, size, qty<br/>
+            • <strong>kpi</strong> sheet: utilization, storageCost, dwellTime, approvalRate<br/>
+            <strong>Option 2 - Container movement data:</strong><br/>
+            • <strong>GridViewExport</strong> sheet: container no., type size, movement, port, depot, etc.<br/>
+            • System will automatically extract inventory, bookings, and KPIs from movement data
+          </div>
+          
+          {uploadMessage && (
+            <div className={`mt-3 p-3 rounded-md text-sm ${
+              uploadMessage.includes('✅') 
+                ? 'bg-green-900/30 text-green-200 border border-green-700/50' 
+                : 'bg-red-900/30 text-red-200 border border-red-700/50'
+            }`}>
+              <div className="whitespace-pre-wrap">{uploadMessage}</div>
+            </div>
+          )}
+        </div>
+        
+        <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
+          <h3 className="text-lg font-semibold mb-3">🔄 Manual Actions</h3>
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={async () => {
+                await recomputeProposals();
+                window.location.reload();
+              }}
+              className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700"
+              type="button"
+            >
+              Recompute
+            </button>
+            <button 
+              onClick={async () => {
+                await generateAlerts();
+                window.location.reload();
+              }}
+              className="px-3 py-2 rounded bg-orange-600 hover:bg-orange-500"
+              type="button"
+            >
+              Generate Alerts
+            </button>
+          </div>
+        </div>
 
         <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
           <div className="text-sm text-neutral-400 mb-2">Tổng hợp KPI báo cáo</div>
