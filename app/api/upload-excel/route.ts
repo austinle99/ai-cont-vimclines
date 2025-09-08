@@ -28,7 +28,15 @@ export async function POST(req: NextRequest) {
     }
 
     // Dynamic import to avoid build-time issues
-    const { prisma } = await import('@/lib/db');
+    let prisma;
+    try {
+      const dbModule = await import('@/lib/db');
+      prisma = dbModule.prisma;
+    } catch (error) {
+      return NextResponse.json({
+        error: "Database connection failed"
+      }, { status: 503 });
+    }
     
     // Process each worksheet
     console.log('Found sheets:', workbook.worksheets.map(ws => ws.name));
@@ -220,12 +228,12 @@ export async function POST(req: NextRequest) {
     if (Object.keys(insertedData).length > 0) {
       try {
         // Dynamic import to get the server actions
-        const { recomputeProposals, recomputeKPI, generateAlerts } = await import('@/app/action');
+        const actionModule = await import('@/app/action');
         
         // Trigger AI analysis and suggestion generation
-        await recomputeProposals(); // Generate smart proposals
-        await recomputeKPI();       // Update performance metrics
-        await generateAlerts();     // Create intelligent alerts
+        if (actionModule.recomputeProposals) await actionModule.recomputeProposals(); // Generate smart proposals
+        if (actionModule.recomputeKPI) await actionModule.recomputeKPI();       // Update performance metrics
+        if (actionModule.generateAlerts) await actionModule.generateAlerts();     // Create intelligent alerts
         
         console.log('AI suggestions generated successfully');
       } catch (error) {
