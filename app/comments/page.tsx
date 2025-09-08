@@ -1,8 +1,7 @@
-import { getComments } from "@/app/action";
 import CommentForm from "./CommentForm";
 
-export default async function CommentsPage() {
-  const comments = await getComments();
+export default function CommentsPage() {
+  // Temporarily disabled database call during build
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
