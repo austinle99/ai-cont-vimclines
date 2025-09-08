@@ -4,7 +4,6 @@ import { useState } from 'react';
 
 const ExcelUpload = () => {
   const [file, setFile] = useState<File | null>(null);
-  const [table, setTable] = useState<string>('inventory');
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<string>('');
 
@@ -28,9 +27,8 @@ const ExcelUpload = () => {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('table', table);
 
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/api/upload-excel', {
         method: 'POST',
         body: formData,
       });
@@ -38,7 +36,7 @@ const ExcelUpload = () => {
       const result = await response.json();
 
       if (response.ok) {
-        setMessage(`✅ ${result.message}`);
+        setMessage(`✅ ${result.message}\n📊 Inserted: ${JSON.stringify(result.insertedData, null, 2)}\n📋 Sheets found: ${result.sheets.join(', ')}`);
         setFile(null);
         // Reset file input
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
@@ -54,24 +52,9 @@ const ExcelUpload = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-4">Upload Excel Data</h2>
-      
-      {/* Table Selection */}
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Select Table
-        </label>
-        <select
-          value={table}
-          onChange={(e) => setTable(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="inventory">Inventory</option>
-          <option value="booking">Booking</option>
-          <option value="kpi">KPI</option>
-        </select>
-      </div>
+    <div className="max-w-lg mx-auto p-6 bg-white rounded-lg shadow-md">
+      <h2 className="text-2xl font-bold mb-4">Upload Excel Test Data</h2>
+      <p className="text-gray-600 mb-6">Upload an Excel file with multiple sheets to test the AI suggestions system</p>
 
       {/* File Input */}
       <div className="mb-4">
@@ -115,9 +98,11 @@ const ExcelUpload = () => {
       <div className="mt-6 p-3 bg-gray-50 rounded-md">
         <h3 className="font-semibold text-gray-700 mb-2">Excel Format Requirements:</h3>
         <ul className="text-sm text-gray-600 space-y-1">
-          <li><strong>Inventory:</strong> port, type, stock</li>
-          <li><strong>Booking:</strong> date, origin, destination, size, qty, customer, status</li>
-          <li><strong>KPI:</strong> utilization, storageCost, dwellTime, approvalRate</li>
+          <li><strong>Inventory sheet:</strong> port, type, stock (or Vietnamese: cảng, loại, số lượng)</li>
+          <li><strong>Booking sheet:</strong> date, origin, destination, size, qty, customer, status</li>
+          <li><strong>KPI sheet:</strong> utilization, storageCost, dwellTime, approvalRate</li>
+          <li>📝 Sheet names can be: inventory, booking, kpi (or Vietnamese equivalents)</li>
+          <li>🔄 Data will replace existing records for testing suggestions</li>
         </ul>
       </div>
     </div>
