@@ -1,34 +1,18 @@
 "use client";
 
-import { create } from "@/app/action";
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export default function CommentForm() {
-  const [isPending, startTransition] = useTransition();
-  const [message, setMessage] = useState("");
-  const router = useRouter();
+  const [message, setMessage] = useState("Comments are temporarily disabled during system maintenance.");
 
-  const handleSubmit = (formData: FormData) => {
-    startTransition(async () => {
-      try {
-        await create(formData);
-        setMessage("Comment added successfully!");
-        // Clear the form
-        const form = document.getElementById("commentForm") as HTMLFormElement;
-        form?.reset();
-        // Refresh the page to show new comment
-        router.refresh();
-      } catch (error) {
-        setMessage("Error adding comment. Please try again.");
-        console.error(error);
-      }
-    });
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setMessage("Comment functionality is currently disabled. Please try again later.");
   };
 
   return (
     <>
-      <form id="commentForm" action={handleSubmit} className="space-y-4">
+      <form id="commentForm" onSubmit={handleSubmit} className="space-y-4 opacity-50">
         <div>
           <label htmlFor="content" className="block text-sm font-medium text-gray-700 mb-2">
             Comment Content
@@ -36,28 +20,24 @@ export default function CommentForm() {
           <textarea
             id="content"
             name="content"
-            required
+            disabled
             rows={4}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            placeholder="Enter your comment here..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 cursor-not-allowed"
+            placeholder="Comments are temporarily disabled..."
           />
         </div>
         
         <button
           type="submit"
-          disabled={isPending}
-          className="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white font-medium py-2 px-4 rounded-md transition-colors"
+          disabled
+          className="bg-gray-400 text-white font-medium py-2 px-4 rounded-md cursor-not-allowed"
         >
-          {isPending ? "Adding Comment..." : "Add Comment"}
+          Add Comment (Disabled)
         </button>
       </form>
       
       {message && (
-        <div className={`mt-4 p-3 rounded-md ${
-          message.includes("successfully") 
-            ? "bg-green-100 text-green-700 border border-green-300" 
-            : "bg-red-100 text-red-700 border border-red-300"
-        }`}>
+        <div className="mt-4 p-3 rounded-md bg-yellow-100 text-yellow-700 border border-yellow-300">
           {message}
         </div>
       )}
