@@ -20,10 +20,18 @@ export async function POST(req: NextRequest) {
     
     const results: any = {};
     
-    // Check if we're in build time (no DATABASE_URL available)
-    if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('file:')) {
+    // Check if DATABASE_URL is available
+    if (!process.env.DATABASE_URL) {
       return NextResponse.json({
-        error: "Database not available during build time"
+        error: "DATABASE_URL environment variable not set on Vercel",
+        details: "Please add DATABASE_URL to your Vercel environment variables",
+        suggestion: "Go to Vercel Dashboard → Project Settings → Environment Variables"
+      }, { status: 503 });
+    }
+
+    if (process.env.DATABASE_URL.includes('file:')) {
+      return NextResponse.json({
+        error: "SQLite database detected - PostgreSQL required for production"
       }, { status: 503 });
     }
 
@@ -33,8 +41,11 @@ export async function POST(req: NextRequest) {
       const dbModule = await import('@/lib/db');
       prisma = dbModule.prisma;
     } catch (error) {
+      console.error('Database import error:', error);
       return NextResponse.json({
-        error: "Database connection failed"
+        error: "Database connection failed",
+        details: error instanceof Error ? error.message : 'Unknown error',
+        databaseUrl: process.env.DATABASE_URL ? 'Set (hidden for security)' : 'Not set'
       }, { status: 503 });
     }
     
