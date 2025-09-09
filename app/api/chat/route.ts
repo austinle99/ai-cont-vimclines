@@ -111,9 +111,27 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // ML Suggestions Support in Chat API
+    if (/suggest|gợi ý|recommend|khuyến nghị/i.test(q)) {
+      try {
+        const { askChat } = await import('@/app/action');
+        const result = await askChat(query);
+        return NextResponse.json({
+          message: result.message,
+          mlSuggestions: result.mlSuggestions,
+          sessionId: result.sessionId
+        });
+      } catch (error) {
+        console.error('ML suggestions in chat API failed:', error);
+        return NextResponse.json({
+          message: "💡 **Hệ thống ML đang khởi tạo...**\n\nUpload file Excel để cải thiện chất lượng gợi ý."
+        });
+      }
+    }
+
     if (/help|trợ giúp|hướng dẫn/i.test(q)) {
       return NextResponse.json({
-        message: `🤖 **Các lệnh và khả năng của Chatbot:**\n\n**Truy vấn thông tin:**\n• "KPI" - Xem chỉ số hiệu suất\n• "tồn kho" - Kiểm tra mức tồn\n• "đề xuất" - Xem xét kế hoạch chuyển kho\n• "cảnh báo" - Xem cảnh báo đang hoạt động\n• "gợi ý" - Nhận khuyến nghị thông minh\n\n**Lệnh hành động:**\n• "phê duyệt P0001" - Phê duyệt đề xuất cụ thể\n• "từ chối P0002" - Từ chối đề xuất\n• "tính lại" - Tính toán lại tất cả đề xuất\n• "giải quyết cảnh báo A0001" - Đóng cảnh báo`
+        message: `🤖 **Các lệnh và khả năng của Chatbot:**\n\n**Truy vấn thông tin:**\n• "KPI" - Xem chỉ số hiệu suất\n• "tồn kho" - Kiểm tra mức tồn\n• "đề xuất" - Xem xét kế hoạch chuyển kho\n• "cảnh báo" - Xem cảnh báo đang hoạt động\n• "gợi ý" - Nhận khuyến nghị ML thông minh\n\n**Lệnh hành động:**\n• "phê duyệt P0001" - Phê duyệt đề xuất cụ thể\n• "từ chối P0002" - Từ chối đề xuất\n• "tính lại" - Tính toán lại tất cả đề xuất\n• "giải quyết cảnh báo A0001" - Đóng cảnh báo\n\n**🤖 ML Features:**\n• Gợi ý học từ dữ liệu Excel của bạn\n• Cải thiện theo thời gian từ feedback\n• Phân tích patterns và trends tự động`
       });
     }
 

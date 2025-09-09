@@ -67,3 +67,36 @@ model Comment {
   content   String
   createdAt DateTime @default(now())
 }
+
+// ML Training and Learning Models
+model MLTrainingData {
+  id          String   @id @default(cuid())
+  timestamp   DateTime @default(now())
+  features    Json     // SuggestionFeatures as JSON
+  suggestion  Json     // Full suggestion data
+  outcome     Float?   // 0-1 score based on user action (null until feedback)
+  context     Json     // Business context when suggestion was made
+  sessionId   String?  // Group suggestions from same Excel upload
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  feedback SuggestionFeedback[]
+
+  @@index([timestamp])
+  @@index([sessionId])
+}
+
+model SuggestionFeedback {
+  id           String   @id @default(cuid())
+  suggestionId String   // References MLTrainingData.id
+  action       String   // 'accepted', 'rejected', 'modified', 'ignored'
+  userId       String?
+  timestamp    DateTime @default(now())
+  context      Json?    // Additional context about the feedback
+  notes        String?  // User notes about why they took this action
+  
+  trainingData MLTrainingData @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+
+  @@index([suggestionId])
+  @@index([action])
+}

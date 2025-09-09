@@ -131,6 +131,47 @@ export async function importExcel(formData: FormData) {
   await recomputeKPI();
   await generateAlerts();
 
+  // NEW: Generate ML suggestions after data import for learning
+  try {
+    const { MLSuggestionEngine } = await import('@/lib/ml/enhancedSuggestions');
+    const { MLDataService } = await import('@/lib/ml/dataService');
+    
+    const mlEngine = new MLSuggestionEngine();
+    const dataService = new MLDataService();
+    
+    // Get current system state after import
+    const [kpi, inventory, proposals, alerts] = await Promise.all([
+      prisma.kPI.findFirst(),
+      prisma.inventory.findMany(),
+      prisma.proposal.findMany(),
+      prisma.alert.findMany({ where: { status: "active" } })
+    ]);
+    
+    // Get recent historical data for ML context
+    const historicalData = await dataService.getHistoricalTrainingData(100);
+    
+    const systemContext = {
+      kpi,
+      inventory,
+      proposals,
+      alerts,
+      bookings,
+      historical: historicalData
+    };
+    
+    // Generate ML suggestions based on new data
+    const mlSuggestions = await mlEngine.generateSmartSuggestions(systemContext);
+    
+    // Store for future learning with Excel upload session ID
+    const sessionId = `excel_upload_${Date.now()}`;
+    await dataService.storeTrainingData(mlSuggestions, systemContext, sessionId);
+    
+    console.log(`🤖 ML generated ${mlSuggestions.length} suggestions after Excel import`);
+  } catch (error) {
+    console.error('ML suggestion generation after import failed:', error);
+    // Don't break the import process if ML fails
+  }
+
   revalidatePath("/");
   revalidatePath("/proposals");
   revalidatePath("/reports");
@@ -321,7 +362,7 @@ export async function ignoreAlert(formData: FormData) {
 }
 
 // Enhanced Chat Assistant with Action Capabilities
-export async function askChat(q: string): Promise<{ message: string; action?: string; actionData?: any }> {
+export async function askChat(q: string): Promise<{ message: string; action?: string; actionData?: any; mlSuggestions?: any[]; sessionId?: string }> {
   const prisma = await getPrisma();
   const [kpi, inv, props, alerts, bookings] = await Promise.all([
     prisma.kPI.findFirst(),
@@ -451,33 +492,90 @@ export async function askChat(q: string): Promise<{ message: string; action?: st
   }
 
   if (/suggest|gợi ý|recommend|khuyến nghị/i.test(query)) {
-    const suggestions = [];
-    
-    // Analyze current state and provide comprehensive suggestions
-    const criticalAlerts = alerts.filter(a => a.level === "Cao");
-    const pendingProps = props.filter(p => p.status === "draft");
-    
-    if (criticalAlerts.length > 0) {
-      suggestions.push("🚨 **Ưu tiên 1:** Giải quyết thiếu hụt tồn kho quan trọng ngay lập tức");
+    // NEW ML-POWERED SUGGESTIONS
+    try {
+      const { MLSuggestionEngine } = await import('@/lib/ml/enhancedSuggestions');
+      const { MLDataService } = await import('@/lib/ml/dataService');
+      
+      const mlEngine = new MLSuggestionEngine();
+      const dataService = new MLDataService();
+      
+      // Get historical training data for ML model
+      const historicalData = await dataService.getHistoricalTrainingData(500);
+      
+      // Prepare system context for ML analysis
+      const systemContext = {
+        kpi,
+        inventory: inv,
+        proposals: props,
+        alerts,
+        bookings,
+        historical: historicalData
+      };
+      
+      // Generate ML-powered suggestions
+      const mlSuggestions = await mlEngine.generateSmartSuggestions(systemContext);
+      
+      // Generate session ID for tracking
+      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Store suggestions for learning (async, don't wait)
+      dataService.storeTrainingData(mlSuggestions, systemContext, sessionId).catch(console.error);
+      
+      if (mlSuggestions.length === 0) {
+        return {
+          message: `💡 **Hệ thống ML đang phân tích...**\n\nHiện tại không có gợi ý khẩn cấp. Hệ thống sẽ học từ dữ liệu của bạn để cung cấp gợi ý tốt hơn.\n\n**Thử:**\n• Upload thêm file Excel để ML học patterns\n• Gõ "KPI" hoặc "tồn kho" để xem phân tích chi tiết`
+        };
+      }
+      
+      // Format ML suggestions for display
+      const formattedSuggestions = mlSuggestions.map((suggestion, index) => {
+        const priorityEmoji = suggestion.priority === 'high' ? '🔥' : 
+                            suggestion.priority === 'medium' ? '⚡' : '📋';
+        
+        return `${priorityEmoji} **${index + 1}. ${suggestion.message}**\n` +
+               `   📊 Độ tin cậy: ${Math.round(suggestion.confidence * 100)}% | ${suggestion.reasoning}\n` +
+               `   🎯 ${suggestion.expectedImpact}\n` +
+               `   ⏱️ ${suggestion.timeline}\n` +
+               `   📚 ${suggestion.learnedFrom}`;
+      });
+      
+      return {
+        message: `🤖 **Gợi ý thông minh từ ML:**\n\n${formattedSuggestions.join("\n\n")}\n\n` +
+                `**Cách ML hoạt động:**\n• Phân tích ${historicalData.length} trường hợp lịch sử\n• Học từ feedback của bạn\n• Cải thiện theo thời gian\n\n` +
+                `**Lệnh nhanh:**\n• "phê duyệt P0001" - Phê duyệt đề xuất\n• "tính lại" - Cập nhật đề xuất\n• "giải quyết cảnh báo A0001" - Đóng cảnh báo`,
+        mlSuggestions, // Include raw data for potential action handling
+        sessionId
+      };
+    } catch (error) {
+      console.error('ML suggestion error:', error);
+      
+      // Fallback to original logic if ML fails
+      const suggestions = [];
+      const criticalAlerts = alerts.filter(a => a.level === "Cao");
+      const pendingProps = props.filter(p => p.status === "draft");
+      
+      if (criticalAlerts.length > 0) {
+        suggestions.push("🚨 **Ưu tiên 1:** Giải quyết thiếu hụt tồn kho quan trọng ngay lập tức");
+      }
+      if (pendingProps.length > 5) {
+        suggestions.push("⏰ **Ưu tiên 2:** Xem xét và phê duyệt các đề xuất chuyển kho chờ xử lý");
+      }
+      
+      const lowStock = inv.filter(i => {
+        const safety = getSafety(i.port, i.type);
+        return i.stock < safety * 1.5;
+      });
+      if (lowStock.length > 0) {
+        suggestions.push("📦 **Ưu tiên 3:** Theo dõi mức tồn kho tại các vị trí có rủi ro");
+      }
+      
+      suggestions.push("🔄 **Hành động thường xuyên:** Gõ 'tính lại' sau khi có đặt hàng mới để tối ưu hóa chuyển kho");
+      
+      return {
+        message: `💡 **Gợi ý cơ bản (ML tạm thời không khả dụng):**\n\n${suggestions.join("\n\n")}\n\n**Lưu ý:** Hệ thống ML đang được khởi tạo. Upload thêm file Excel để cải thiện chất lượng gợi ý.`
+      };
     }
-    if (pendingProps.length > 5) {
-      suggestions.push("⏰ **Ưu tiên 2:** Xem xét và phê duyệt các đề xuất chuyển kho chờ xử lý");
-    }
-    
-    const lowStock = inv.filter(i => {
-      const safety = getSafety(i.port, i.type);
-      return i.stock < safety * 1.5;
-    });
-    if (lowStock.length > 0) {
-      suggestions.push("📦 **Ưu tiên 3:** Theo dõi mức tồn kho tại các vị trí có rủi ro");
-    }
-    
-    suggestions.push("🔄 **Hành động thường xuyên:** Gõ 'tính lại' sau khi có đặt hàng mới để tối ưu hóa chuyển kho");
-    suggestions.push("📊 **Theo dõi:** Kiểm tra xu hướng KPI hàng tuần để nắm bắt hiệu suất");
-    
-    return {
-      message: `💡 **Khuyến nghị thông minh dựa trên dữ liệu hiện tại:**\n\n${suggestions.join("\n\n")}\n\n**Lệnh nhanh:**\n• "phê duyệt P0001" - Phê duyệt đề xuất\n• "tính lại" - Cập nhật tất cả đề xuất\n• "giải quyết cảnh báo A0001" - Đóng cảnh báo`
-    };
   }
 
   if (/help|trợ giúp|hướng dẫn/i.test(query)) {
@@ -544,6 +642,53 @@ export async function executeChatAction(action: string, actionData?: any) {
   }
   
   return { success: false, message: "Tham số hành động không hợp lệ." };
+}
+
+// NEW: ML Feedback Collection
+export async function recordSuggestionFeedback(formData: FormData) {
+  const suggestionId = formData.get("suggestionId") as string;
+  const action = formData.get("action") as string;
+  const notes = formData.get("notes") as string;
+  
+  if (!suggestionId || !action) {
+    throw new Error("Missing suggestion ID or action");
+  }
+  
+  try {
+    const { MLDataService } = await import('@/lib/ml/dataService');
+    const dataService = new MLDataService();
+    
+    await dataService.recordSuggestionFeedback(
+      suggestionId, 
+      action as 'accepted' | 'rejected' | 'modified' | 'ignored',
+      notes || undefined
+    );
+    
+    console.log(`📊 ML feedback recorded: ${suggestionId} -> ${action}`);
+    return { success: true, message: "Feedback recorded for ML learning" };
+  } catch (error) {
+    console.error('Failed to record ML feedback:', error);
+    return { success: false, message: "Failed to record feedback" };
+  }
+}
+
+// NEW: Get ML Insights for Admin/Dashboard
+export async function getMLInsights() {
+  try {
+    const { MLDataService } = await import('@/lib/ml/dataService');
+    const dataService = new MLDataService();
+    
+    return await dataService.getMLInsights();
+  } catch (error) {
+    console.error('Failed to get ML insights:', error);
+    return {
+      totalSuggestions: 0,
+      feedbackRate: 0,
+      acceptanceRate: 0,
+      topPerformingSuggestionTypes: [],
+      recentTrends: { weeklyAcceptance: 0, improvementTrend: 0 }
+    };
+  }
 }
 
 export async function create(formData: FormData) {
