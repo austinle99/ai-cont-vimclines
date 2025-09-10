@@ -34,8 +34,17 @@ model Booking {
   qty         Int
   customer    String?
   status      String?
+  // Optimization fields
+  containerNo             String?
+  emptyLaden              String?
+  depot                   String?
+  optimizationSuggestion  String?
+  optimizationScore       Int?
+  optimizationType        String?
 
   @@index([origin, destination, size])
+  @@index([optimizationScore])
+  @@index([optimizationType])
 }
 
 model Proposal {

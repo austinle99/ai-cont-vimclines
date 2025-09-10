@@ -150,23 +150,231 @@ export async function POST(req: NextRequest) {
     // Process Booking data - Handle both direct booking sheets and GridViewExport
     let bookingData = results.booking || results.bookings || results['đặt chỗ'];
     
-    // If no direct booking sheet, try to extract from GridViewExport
+    // If no direct booking sheet, try to extract from GridViewExport with optimization analysis
     if (!bookingData && results.gridviewexport) {
-      console.log('Processing bookings from GridViewExport...');
-      // Filter for movements that indicate demand/bookings
-      bookingData = results.gridviewexport
-        .filter((row: any) => row.movement && (row.movement.toLowerCase().includes('gate') || row.movement.toLowerCase().includes('in') || row.movement.toLowerCase().includes('out')))
-        .map((row: any) => ({
-          date: row['movement date'] || row.date || new Date(),
-          origin: row.pol || row.port || row.depot || 'Unknown',
-          destination: row.pod || row.pofd || row.terminal || 'Unknown',
-          size: row['type size'] || row.type || '20GP',
-          qty: 1, // Each row represents 1 container
-          customer: row['shipper name'] || row['consignee name'] || 'Unknown',
-          status: row.movement || 'active',
-          booking_no: row['booking no.'] || undefined
-        }));
-      console.log('Generated booking records:', bookingData.length);
+      console.log('Processing bookings from GridViewExport with optimization analysis...');
+      
+      const containerData = results.gridviewexport;
+      
+      // Analyze container patterns for optimization - PER UNIQUE CONTAINER
+      const containerHistory = new Map<string, any[]>(); // containerNo -> movement history
+      const analysisData = {
+        emptyContainers: new Map<string, number>(), // location -> empty count
+        containerTypes: new Map<string, number>(),  // type -> total count
+        movements: new Map<string, number>(),       // depot -> movement count
+        routes: new Map<string, number>(),          // pol->pod -> frequency
+        depotUtilization: new Map<string, { total: number; empty: number; loaded: number }>(),
+        uniqueContainers: new Map<string, { 
+          latestStatus: string, 
+          currentDepot: string, 
+          typeSize: string,
+          totalMovements: number,
+          dwellTime: number,
+          lastPOL: string,
+          lastPOD: string
+        }>()
+      };
+      
+      // First pass: Group by container ID and build movement history
+      containerData.forEach((row: any) => {
+        const containerNo = row['container no.'] || row['CONTAINER NO.'] || '';
+        const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
+        const movement = row.movement || row['MOVEMENT'] || '';
+        const depot = row.depot || row['DEPOT'] || 'Unknown';
+        const emptyLaden = row['empty/laden'] || row['EMPTY/LADEN'] || '';
+        const pol = row.pol || row['POL'] || '';
+        const pod = row.pod || row['POD'] || '';
+        const systemDate = row['system date'] || row['SYSTEM DATE'] || new Date();
+        
+        if (!containerNo) return; // Skip rows without container number
+        
+        // Build container movement history
+        if (!containerHistory.has(containerNo)) {
+          containerHistory.set(containerNo, []);
+        }
+        containerHistory.get(containerNo)!.push({
+          typeSize, movement, depot, emptyLaden, pol, pod, systemDate,
+          isEmpty: emptyLaden.toLowerCase().includes('empty'),
+          isLoaded: emptyLaden.toLowerCase().includes('laden')
+        });
+      });
+      
+      // Second pass: Analyze each unique container
+      containerHistory.forEach((movements, containerNo) => {
+        // Sort movements by date to get chronological order
+        movements.sort((a: any, b: any) => new Date(a.systemDate).getTime() - new Date(b.systemDate).getTime());
+        
+        const latestMovement = movements[movements.length - 1];
+        const firstMovement = movements[0];
+        
+        // Calculate dwell time (days between first and latest movement)
+        const dwellTime = Math.ceil((new Date(latestMovement.systemDate).getTime() - new Date(firstMovement.systemDate).getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Store unique container analysis
+        analysisData.uniqueContainers.set(containerNo, {
+          latestStatus: latestMovement.emptyLaden,
+          currentDepot: latestMovement.depot,
+          typeSize: latestMovement.typeSize,
+          totalMovements: movements.length,
+          dwellTime: Math.max(dwellTime, 1), // minimum 1 day
+          lastPOL: latestMovement.pol,
+          lastPOD: latestMovement.pod
+        });
+        
+        // Aggregate statistics for depot analysis (count unique containers, not movements)
+        const depot = latestMovement.depot;
+        const typeSize = latestMovement.typeSize;
+        const isEmpty = latestMovement.isEmpty;
+        const isLoaded = latestMovement.isLoaded;
+        
+        // Track container types (unique containers)
+        analysisData.containerTypes.set(typeSize, (analysisData.containerTypes.get(typeSize) || 0) + 1);
+        
+        // Track depot utilization (unique containers)
+        if (!analysisData.depotUtilization.has(depot)) {
+          analysisData.depotUtilization.set(depot, { total: 0, empty: 0, loaded: 0 });
+        }
+        const depotStats = analysisData.depotUtilization.get(depot)!;
+        depotStats.total++;
+        if (isEmpty) depotStats.empty++;
+        if (isLoaded) depotStats.loaded++;
+        
+        // Track routes (unique container journeys)
+        if (latestMovement.pol && latestMovement.pod && latestMovement.pol !== latestMovement.pod) {
+          const route = `${latestMovement.pol}->${latestMovement.pod}`;
+          analysisData.routes.set(route, (analysisData.routes.get(route) || 0) + 1);
+        }
+        
+        // Track movements (unique containers per depot)
+        analysisData.movements.set(depot, (analysisData.movements.get(depot) || 0) + 1);
+        
+        // Track empty containers by location (unique containers)
+        if (isEmpty) {
+          analysisData.emptyContainers.set(depot, (analysisData.emptyContainers.get(depot) || 0) + 1);
+        }
+      });
+      
+      // Generate optimized booking data with suggestions
+      bookingData = containerData
+        .filter((row: any) => {
+          const movement = row.movement || row['MOVEMENT'] || '';
+          return movement && (movement.toLowerCase().includes('gate') || 
+                             movement.toLowerCase().includes('in') || 
+                             movement.toLowerCase().includes('out'));
+        })
+        .map((row: any) => {
+          const containerNo = row['container no.'] || row['CONTAINER NO.'] || '';
+          const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
+          const movement = row.movement || row['MOVEMENT'] || '';
+          const depot = row.depot || row['DEPOT'] || 'Unknown';
+          const emptyLaden = row['empty/laden'] || row['EMPTY/LADEN'] || '';
+          const pol = row.pol || row['POL'] || depot;
+          const pod = row.pod || row['POD'] || 'Unknown';
+          
+          const isEmpty = emptyLaden.toLowerCase().includes('empty');
+          
+          // Get unique container analysis for this specific container
+          const containerAnalysis = analysisData.uniqueContainers.get(containerNo);
+          
+          // Generate optimization suggestion based on UNIQUE container data
+          let optimization = '';
+          let optimizationScore = 0;
+          let optimizationType = 'standard';
+          
+          if (containerAnalysis) {
+            // HIGH PRIORITY: Long dwell time + empty container
+            if (containerAnalysis.dwellTime > 7 && isEmpty) {
+              const depotStats = analysisData.depotUtilization.get(containerAnalysis.currentDepot);
+              const emptyRatio = depotStats ? depotStats.empty / depotStats.total : 0;
+              optimization = `Empty container stuck ${containerAnalysis.dwellTime} days at ${containerAnalysis.currentDepot} (${Math.round(emptyRatio * 100)}% depot empty) - URGENT relocation`;
+              optimizationScore = 95;
+              optimizationType = 'urgent-relocation';
+            }
+            // HIGH PRIORITY: Empty container at high-empty depot
+            else if (isEmpty) {
+              const depotStats = analysisData.depotUtilization.get(containerAnalysis.currentDepot);
+              if (depotStats) {
+                const emptyRatio = depotStats.empty / depotStats.total;
+                if (emptyRatio > 0.6) {
+                  optimization = `Empty at high-density depot ${containerAnalysis.currentDepot} (${Math.round(emptyRatio * 100)}% empty, ${containerAnalysis.dwellTime}d dwell) - Priority relocation`;
+                  optimizationScore = 85;
+                  optimizationType = 'high-priority';
+                } else if (emptyRatio > 0.3) {
+                  optimization = `Empty buildup at ${containerAnalysis.currentDepot} (${Math.round(emptyRatio * 100)}% empty, ${containerAnalysis.dwellTime}d dwell) - Consider relocation`;
+                  optimizationScore = 60;
+                  optimizationType = 'medium-priority';
+                }
+              }
+            }
+            // MEDIUM PRIORITY: High movement frequency (container "ping-ponging")
+            else if (containerAnalysis.totalMovements > 5) {
+              optimization = `High activity container (${containerAnalysis.totalMovements} movements, ${containerAnalysis.dwellTime}d cycle) - Optimize routing efficiency`;
+              optimizationScore = 65;
+              optimizationType = 'routing-efficiency';
+            }
+            // MEDIUM PRIORITY: Long dwell time for loaded container
+            else if (containerAnalysis.dwellTime > 10 && !isEmpty) {
+              optimization = `Loaded container delayed ${containerAnalysis.dwellTime} days at ${containerAnalysis.currentDepot} - Check dispatch schedule`;
+              optimizationScore = 55;
+              optimizationType = 'dispatch-delay';
+            }
+          }
+          
+          // ROUTE OPTIMIZATION: Popular route (fallback if no container-specific issues)
+          if (!optimization && pol && pod && pol !== pod) {
+            const route = `${pol}->${pod}`;
+            const routeFreq = analysisData.routes.get(route) || 0;
+            const totalRoutes = Array.from(analysisData.routes.values()).reduce((a, b) => a + b, 0);
+            if (routeFreq > totalRoutes * 0.1) {
+              optimization = `High-frequency route ${pol}→${pod} (${routeFreq} containers) - Optimize scheduling`;
+              optimizationScore = 45;
+              optimizationType = 'route-optimization';
+            }
+          }
+          
+          // TYPE BALANCE: Container type imbalance (lowest priority)
+          if (!optimization) {
+            const typeTotal = analysisData.containerTypes.get(typeSize) || 0;
+            const allTypes = Array.from(analysisData.containerTypes.values()).reduce((a, b) => a + b, 0);
+            if (typeTotal > allTypes * 0.5) {
+              optimization = `${typeSize} type dominance (${Math.round((typeTotal/allTypes) * 100)}% of fleet) - Monitor balance`;
+              optimizationScore = 30;
+              optimizationType = 'type-balance';
+            } else {
+              optimization = 'Standard operations - No immediate optimization needed';
+              optimizationScore = 15;
+              optimizationType = 'standard';
+            }
+          }
+          
+          return {
+            date: row['system date'] || row['SYSTEM DATE'] || new Date(),
+            origin: pol,
+            destination: pod,
+            size: typeSize,
+            qty: 1,
+            customer: row['consignee name'] || row['CONSIGNEE NAME'] || 'Unknown',
+            status: movement,
+            booking_no: containerNo,
+            // Optimization data
+            container_no: containerNo,
+            empty_laden: emptyLaden,
+            depot: depot,
+            optimization_suggestion: optimization,
+            optimization_score: optimizationScore,
+            optimization_type: optimizationType
+          };
+        });
+      
+      console.log(`Generated booking records with optimization analysis: ${bookingData.length}`);
+      console.log('Depot utilization:', Array.from(analysisData.depotUtilization.entries()).map(([depot, stats]) => 
+        `${depot}: ${Math.round((stats.empty/stats.total)*100)}% empty`
+      ));
+      console.log('Top routes:', Array.from(analysisData.routes.entries())
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 5)
+        .map(([route, count]) => `${route}: ${count} containers`)
+      );
     }
     
     if (bookingData) {
@@ -180,7 +388,14 @@ export async function POST(req: NextRequest) {
           size: row.size || row.kích_thước || row.container_size || '',
           qty: parseInt(row.qty || row.quantity || row['số lượng'] || '1'),
           customer: row.customer || row.khách_hàng || row.client || '',
-          status: row.status || row.trạng_thái || 'active'
+          status: row.status || row.trạng_thái || 'active',
+          // Add optimization data
+          containerNo: row.container_no || null,
+          emptyLaden: row.empty_laden || null,
+          depot: row.depot || null,
+          optimizationSuggestion: row.optimization_suggestion || null,
+          optimizationScore: row.optimization_score || null,
+          optimizationType: row.optimization_type || null
         };
         
         if (record.origin && record.destination && record.size) {
