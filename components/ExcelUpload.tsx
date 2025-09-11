@@ -33,16 +33,29 @@ const ExcelUpload = () => {
         body: formData,
       });
 
-      const result = await response.json();
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      let result;
+      
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        // Server returned HTML error page
+        const text = await response.text();
+        result = { 
+          error: 'Server error - received HTML instead of JSON', 
+          details: text.substring(0, 200) + '...' 
+        };
+      }
 
-      if (response.ok) {
+      if (response.ok && result.success) {
         setMessage(`✅ ${result.message}\n📊 Inserted: ${JSON.stringify(result.insertedData, null, 2)}\n📋 Sheets found: ${result.sheets.join(', ')}`);
         setFile(null);
         // Reset file input
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
       } else {
-        setMessage(`❌ Error: ${result.error}`);
+        setMessage(`❌ Error: ${result.error}${result.details ? '\n' + result.details : ''}`);
       }
     } catch (error) {
       setMessage(`❌ Upload failed: ${error}`);

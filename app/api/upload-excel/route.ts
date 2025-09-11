@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as ExcelJS from 'exceljs';
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+  console.log('🚀 Starting Excel upload processing...');
+  
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File;
@@ -14,8 +17,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only Excel files are allowed' }, { status: 400 });
     }
 
-    // Parse Excel file
+    console.log(`📁 Processing file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+    // Check file size limit (50MB max)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json({ 
+        error: 'File too large', 
+        details: `File size ${(file.size / 1024 / 1024).toFixed(2)}MB exceeds limit of ${MAX_FILE_SIZE / 1024 / 1024}MB`
+      }, { status: 413 });
+    }
+
+    // Parse Excel file with timeout protection
     const workbook = new ExcelJS.Workbook();
+    console.log('📊 Loading Excel workbook...');
     await workbook.xlsx.load(await file.arrayBuffer());
     
     const results: any = {};
@@ -50,7 +65,16 @@ export async function POST(req: NextRequest) {
     }
     
     // Process each worksheet
-    console.log('Found sheets:', workbook.worksheets.map(ws => ws.name));
+    const worksheetNames = workbook.worksheets.map(ws => ws.name);
+    console.log('Found sheets:', worksheetNames);
+    
+    // Count total rows across all sheets for processing decision
+    let totalRows = 0;
+    workbook.worksheets.forEach(ws => totalRows += ws.rowCount);
+    console.log(`Total rows across all sheets: ${totalRows}`);
+    
+    const LARGE_FILE_THRESHOLD = 5000; // Consider "large" if > 5k total rows
+    const isLargeFile = totalRows > LARGE_FILE_THRESHOLD;
     
     workbook.eachSheet((worksheet) => {
       const sheetName = worksheet.name.toLowerCase();
@@ -67,6 +91,20 @@ export async function POST(req: NextRequest) {
       });
       
       console.log(`Sheet "${worksheet.name}" headers:`, headers);
+      
+      // Log sample first row data to help debug column mapping
+      if (worksheet.rowCount > 1) {
+        const sampleRow = worksheet.getRow(2);
+        const sampleData: any = {};
+        sampleRow.eachCell((cell, colNumber) => {
+          const headerCell = worksheet.getCell(1, colNumber);
+          const header = headerCell.value?.toString().toLowerCase().trim();
+          if (header) {
+            sampleData[header] = cell.value;
+          }
+        });
+        console.log(`Sample data from "${worksheet.name}":`, sampleData);
+      }
       
       // Skip header row and get data
       worksheet.eachRow((row, rowIndex) => {
@@ -153,8 +191,18 @@ export async function POST(req: NextRequest) {
     // If no direct booking sheet, try to extract from GridViewExport with optimization analysis
     if (!bookingData && results.gridviewexport) {
       console.log('Processing bookings from GridViewExport with optimization analysis...');
+      console.log(`Total GridViewExport records: ${results.gridviewexport.length}`);
       
       const containerData = results.gridviewexport;
+      
+      // Add processing limit for large datasets
+      const MAX_PROCESSING_LIMIT = isLargeFile ? 2000 : 10000; // Stricter limit for large files
+      const limitedData = containerData.length > MAX_PROCESSING_LIMIT ? 
+        containerData.slice(0, MAX_PROCESSING_LIMIT) : containerData;
+      
+      if (containerData.length > MAX_PROCESSING_LIMIT) {
+        console.log(`⚠️ Large dataset detected (${containerData.length} records). Processing first ${MAX_PROCESSING_LIMIT} records using ${isLargeFile ? 'fast mode' : 'normal mode'}.`);
+      }
       
       // Analyze container patterns for optimization - PER UNIQUE CONTAINER
       const containerHistory = new Map<string, any[]>(); // containerNo -> movement history
@@ -175,8 +223,11 @@ export async function POST(req: NextRequest) {
         }>()
       };
       
-      // First pass: Group by container ID and build movement history
-      containerData.forEach((row: any) => {
+      // First pass: Group by container ID and build movement history (use limited data)
+      limitedData.forEach((row: any, index: number) => {
+        if (index % 1000 === 0) {
+          console.log(`Processing record ${index + 1}/${limitedData.length}...`);
+        }
         const containerNo = row['container no.'] || row['CONTAINER NO.'] || '';
         const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
         const movement = row.movement || row['MOVEMENT'] || '';
@@ -254,8 +305,8 @@ export async function POST(req: NextRequest) {
         }
       });
       
-      // Generate optimized booking data with suggestions
-      bookingData = containerData
+      // Generate optimized booking data with suggestions (use limited data)
+      bookingData = limitedData
         .filter((row: any) => {
           const movement = row.movement || row['MOVEMENT'] || '';
           return movement && (movement.toLowerCase().includes('gate') || 
@@ -263,13 +314,32 @@ export async function POST(req: NextRequest) {
                              movement.toLowerCase().includes('out'));
         })
         .map((row: any) => {
-          const containerNo = row['container no.'] || row['CONTAINER NO.'] || '';
-          const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
-          const movement = row.movement || row['MOVEMENT'] || '';
-          const depot = row.depot || row['DEPOT'] || 'Unknown';
-          const emptyLaden = row['empty/laden'] || row['EMPTY/LADEN'] || '';
-          const pol = row.pol || row['POL'] || depot;
-          const pod = row.pod || row['POD'] || 'Unknown';
+          const containerNo = row['container no.'] || row['CONTAINER NO.'] || row['container no'] || row['containerno'] || '';
+          const typeSize = row['type size'] || row['TYPE SIZE'] || row['type/size'] || row['container size'] || row['size'] || '20GP';
+          const movement = row.movement || row['MOVEMENT'] || row['move type'] || row['movetype'] || '';
+          const depot = row.depot || row['DEPOT'] || row['location'] || row['terminal'] || row['yard'] || 'Unknown';
+          const emptyLaden = row['empty/laden'] || row['EMPTY/LADEN'] || row['empty laden'] || row['status'] || row['container status'] || '';
+          
+          // Enhanced POL (Port of Loading) mapping
+          const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] || 
+                      row['discharge port'] || row['loading port'] || row['pol port'] || depot;
+          
+          // Enhanced POD (Port of Discharge) mapping with better fallbacks
+          const pod = row.pod || row['POD'] || row['port of discharge'] || row['destination'] || row['to'] || 
+                      row['discharge port'] || row['delivery port'] || row['pod port'] || row['final destination'] ||
+                      row['dest'] || row['discharge'] || pol; // Use POL as fallback instead of 'Unknown'
+          
+          // Debug logging for first few records to see what columns actually exist
+          if (index < 5) {
+            console.log(`Record ${index + 1} POD mapping:`, {
+              raw_pod: row.pod,
+              raw_POD: row['POD'], 
+              destination: row.destination,
+              to: row.to,
+              final_pod: pod,
+              all_keys: Object.keys(row).slice(0, 10) // Show first 10 column names
+            });
+          }
           
           const isEmpty = emptyLaden.toLowerCase().includes('empty');
           
@@ -383,12 +453,12 @@ export async function POST(req: NextRequest) {
       for (const row of bookingData) {
         const record = {
           date: new Date(row.date || row.ngày || Date.now()),
-          origin: row.origin || row.xuất_phát || row.from || '',
-          destination: row.destination || row.đích || row.to || '',
-          size: row.size || row.kích_thước || row.container_size || '',
+          origin: row.origin || row.xuất_phát || row.from || row.pol || row.depot || '',
+          destination: row.destination || row.đích || row.to || row.pod || row.origin || 'Internal',
+          size: row.size || row.kích_thước || row.container_size || row.typeSize || '20GP',
           qty: parseInt(row.qty || row.quantity || row['số lượng'] || '1'),
-          customer: row.customer || row.khách_hàng || row.client || '',
-          status: row.status || row.trạng_thái || 'active',
+          customer: row.customer || row.khách_hàng || row.client || row.consignee || 'Unknown',
+          status: row.status || row.trạng_thái || row.movement || 'active',
           // Add optimization data
           containerNo: row.container_no || null,
           emptyLaden: row.empty_laden || null,
@@ -404,6 +474,8 @@ export async function POST(req: NextRequest) {
       }
       
       if (bookingRecords.length > 0) {
+        // Clear existing booking data to prevent duplicates
+        await prisma.booking.deleteMany();
         await prisma.booking.createMany({
           data: bookingRecords
         });
@@ -467,12 +539,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`✅ Processing completed in ${processingTime}s`);
+
     return NextResponse.json({
       success: true,
-      message: 'Excel file processed successfully - AI suggestions generated!',
+      message: `Excel file processed successfully in ${processingTime}s - AI suggestions generated!`,
       sheets: Object.keys(results),
       insertedData,
       aiSuggestions: 'Generated and available in chatbot',
+      processingTime: `${processingTime}s`,
       preview: Object.entries(results).reduce((acc, [key, value]) => {
         acc[key] = Array.isArray(value) ? value.slice(0, 3) : value;
         return acc;
