@@ -98,8 +98,9 @@ export default function Page() {
               <div className="flex gap-2">
                 <button 
                   onClick={async () => {
-                    await approveProposal(p.id);
-                    window.location.reload();
+                    // Optimistically remove the proposal from the UI
+                    setProposals(proposals.filter(item => item.id !== p.id));
+                    await approveProposal(p.id); // Action can complete in the background
                   }}
                   className="px-3 py-1 rounded bg-green-600 hover:bg-green-500"
                   type="button"
@@ -108,8 +109,9 @@ export default function Page() {
                 </button>
                 <button 
                   onClick={async () => {
-                    await rejectProposal(p.id);
-                    window.location.reload();
+                    // Optimistically remove the proposal from the UI
+                    setProposals(proposals.filter(item => item.id !== p.id));
+                    await rejectProposal(p.id); // Action can complete in the background
                   }}
                   className="px-3 py-1 rounded bg-red-600 hover:bg-red-500"
                   type="button"
