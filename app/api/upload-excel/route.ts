@@ -36,14 +36,45 @@ export async function POST(req: NextRequest) {
     try {
       // Use streaming for large files to reduce memory usage
       const buffer = await file.arrayBuffer();
-      console.log(`Buffer size: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+      const bufferSizeMB = buffer.byteLength / 1024 / 1024;
+      console.log(`Buffer size: ${bufferSizeMB.toFixed(2)} MB`);
+      
+      // Add memory check for very large files
+      if (bufferSizeMB > 45) {
+        console.warn(`⚠️ Large file detected: ${bufferSizeMB.toFixed(2)} MB - using optimized processing`);
+      }
+      
+      // Load with error handling for corrupted or invalid files
       await workbook.xlsx.load(buffer);
+      
+      // Verify the workbook loaded successfully
+      if (!workbook.worksheets || workbook.worksheets.length === 0) {
+        throw new Error('Excel file contains no readable worksheets');
+      }
+      
     } catch (error) {
       console.error('Excel parsing error:', error);
+      
+      // More specific error messages based on error type
+      let errorDetails = error instanceof Error ? error.message : 'Invalid Excel format';
+      let suggestion = 'Please ensure the file is a valid .xlsx or .xls format';
+      
+      if (errorDetails.includes('zip') || errorDetails.includes('signature')) {
+        suggestion = 'File appears corrupted or is not a valid Excel file. Try saving it again from Excel.';
+      } else if (errorDetails.includes('memory') || errorDetails.includes('heap')) {
+        suggestion = 'File is too large for processing. Try reducing the number of rows or splitting into smaller files.';
+      } else if (errorDetails.includes('timeout')) {
+        suggestion = 'File processing timed out. Try uploading a smaller file.';
+      }
+      
       return NextResponse.json({
         error: 'Failed to parse Excel file',
-        details: error instanceof Error ? error.message : 'Invalid Excel format',
-        suggestion: 'Please ensure the file is a valid .xlsx or .xls format'
+        details: errorDetails,
+        suggestion: suggestion,
+        fileInfo: {
+          name: file.name,
+          size: `${(file.size / 1024 / 1024).toFixed(2)} MB`
+        }
       }, { status: 400 });
     }
     
@@ -135,9 +166,43 @@ export async function POST(req: NextRequest) {
           // Get header from first row
           const headerCell = worksheet.getCell(1, colNumber);
           const header = headerCell.value?.toString().toLowerCase().trim();
-          if (header && cell.value !== null && cell.value !== undefined && cell.value !== '') {
-            rowData[header] = cell.value;
-            hasData = true;
+          if (header) {
+            // Handle different data types and missing values properly
+            let cellValue = cell.value;
+            
+            // Handle Excel date values
+            if (cell.type === ExcelJS.ValueType.Date && cellValue) {
+              cellValue = new Date(cellValue as Date).toISOString();
+            }
+            // Handle Excel formula results
+            else if (cell.type === ExcelJS.ValueType.Formula && cell.result !== null && cell.result !== undefined) {
+              cellValue = cell.result;
+            }
+            // Handle hyperlinks - extract the text
+            else if (cell.type === ExcelJS.ValueType.Hyperlink && cellValue) {
+              cellValue = (cellValue as any).text || (cellValue as any).hyperlink || cellValue;
+            }
+            // Handle rich text - extract plain text
+            else if (cell.type === ExcelJS.ValueType.RichText && cellValue) {
+              cellValue = (cellValue as any).richText?.map((rt: any) => rt.text).join('') || cellValue;
+            }
+            
+            // Include cell if it has meaningful data (including 0, false, empty strings as valid data)
+            if (cellValue !== null && cellValue !== undefined) {
+              // Convert to string and trim if it's a string, but preserve other types
+              if (typeof cellValue === 'string') {
+                cellValue = cellValue.trim();
+                // Only skip completely empty strings, but keep strings like "0" or " " (intentional spaces)
+                if (cellValue !== '') {
+                  rowData[header] = cellValue;
+                  hasData = true;
+                }
+              } else {
+                // For non-string values (numbers, booleans, dates), include them as-is
+                rowData[header] = cellValue;
+                hasData = true;
+              }
+            }
           }
         });
         
@@ -165,23 +230,34 @@ export async function POST(req: NextRequest) {
     // If no direct inventory sheet, try to extract from GridViewExport
     if (!inventoryData && results.gridviewexport) {
       console.log('Processing inventory from GridViewExport...');
-      // Group containers by port and type to create inventory
-      const containerGroups: { [key: string]: { port: string; type: string; count: number } } = {};
+      // Group containers by port and type to create inventory with empty/laden breakdown
+      const containerGroups: { [key: string]: { port: string; type: string; count: number; emptyCount: number; ladenCount: number } } = {};
       results.gridviewexport.forEach((row: any) => {
         const port = row.depot || row.port || row.terminal || 'Unknown';
         const type = row['type size'] || row.type || '20GP';
+        const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || '';
         const key = `${port}_${type}`;
         
         if (!containerGroups[key]) {
-          containerGroups[key] = { port, type, count: 0 };
+          containerGroups[key] = { port, type, count: 0, emptyCount: 0, ladenCount: 0 };
         }
         containerGroups[key].count++;
+        
+        // Count empty vs laden containers
+        if (emptyLaden && emptyLaden.toLowerCase().includes('empty')) {
+          containerGroups[key].emptyCount++;
+        } else if (emptyLaden && emptyLaden.toLowerCase().includes('laden')) {
+          containerGroups[key].ladenCount++;
+        }
       });
       
       inventoryData = Object.values(containerGroups).map(group => ({
         port: group.port,
         type: group.type,
-        stock: group.count
+        stock: group.count,
+        // Add empty/laden breakdown if available
+        empty_stock: group.emptyCount || 0,
+        laden_stock: group.ladenCount || 0
       }));
       console.log('Generated inventory records:', inventoryData.length);
     }
@@ -267,7 +343,7 @@ export async function POST(req: NextRequest) {
         const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
         const movement = row.movement || row['MOVEMENT'] || '';
         const depot = row.depot || row['DEPOT'] || 'Unknown';
-        const emptyLaden = row['empty/laden'] || row['EMPTY/LADEN'] || '';
+        const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || '';
         // Enhanced POL/POD mapping (consistent with booking generation)
         const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] || 
                     row['discharge port'] || row['loading port'] || row['pol port'] || depot;
@@ -285,8 +361,8 @@ export async function POST(req: NextRequest) {
         }
         containerHistory.get(containerNo)!.push({
           typeSize, movement, depot, emptyLaden, pol, pod, systemDate,
-          isEmpty: emptyLaden.toLowerCase().includes('empty'),
-          isLoaded: emptyLaden.toLowerCase().includes('laden')
+          isEmpty: emptyLaden && emptyLaden.toLowerCase().includes('empty'),
+          isLoaded: emptyLaden && emptyLaden.toLowerCase().includes('laden')
         });
       });
       
@@ -346,36 +422,67 @@ export async function POST(req: NextRequest) {
         });
         
         // Memory management: clear temporary data and force garbage collection for large files
-        if (isLargeFile && global.gc && i % (BATCH_SIZE * 8) === 0) {
-          global.gc();
+        if (isLargeFile) {
+          // Clear batch data to free memory
+          batch.length = 0;
+          
+          // Force garbage collection if available and processing large datasets
+          if (global.gc && i % (BATCH_SIZE * 8) === 0) {
+            console.log(`🧹 Running garbage collection at batch ${Math.floor(i/BATCH_SIZE) + 1}...`);
+            global.gc();
+          }
         }
       }
       
       // Generate optimized booking data with suggestions (use limited data)
       bookingData = limitedData
         .filter((row: any) => {
-          const movement = row.movement || row['MOVEMENT'] || '';
-          return movement && (movement.toLowerCase().includes('gate') || 
-                             movement.toLowerCase().includes('in') || 
-                             movement.toLowerCase().includes('out'));
+          const movement = row.movement || row['MOVEMENT'] || row['movement code'] || '';
+          const movementLower = movement.toLowerCase();
+          
+          // Include all meaningful container movement types based on actual data
+          return movement && (
+            movementLower.includes('discharge') ||
+            movementLower.includes('loading') ||
+            movementLower.includes('export') ||
+            movementLower.includes('import') ||
+            movementLower.includes('delivery') ||
+            movementLower.includes('receiving') ||
+            movementLower.includes('gate') ||
+            movementLower.includes('in') ||
+            movementLower.includes('out') ||
+            movementLower.includes('move') ||
+            movementLower.includes('shift') ||
+            movementLower.includes('transfer') ||
+            movementLower.includes('yard') ||
+            movementLower.includes('depot') ||
+            movementLower.includes('terminal')
+          );
         })
         .map((row: any, index: number) => {
           const containerNo = row['container no.'] || row['CONTAINER NO.'] || row['container no'] || row['containerno'] || '';
           const typeSize = row['type size'] || row['TYPE SIZE'] || row['type/size'] || row['container size'] || row['size'] || '20GP';
-          const movement = row.movement || row['MOVEMENT'] || row['move type'] || row['movetype'] || '';
-          const depot = row.depot || row['DEPOT'] || row['location'] || row['terminal'] || row['yard'] || 'Unknown';
-          const emptyLaden = row['empty/laden'] || row['EMPTY/LADEN'] || row['empty laden'] || row['status'] || row['container status'] || '';
+          const movement = row.movement || row['MOVEMENT'] || row['movement code'] || row['move type'] || row['movetype'] || '';
           
-          // Enhanced POL (Port of Loading) mapping
+          // Enhanced depot/location mapping
+          const depot = row.depot || row['DEPOT'] || row['depot code'] || row['terminal code'] || 
+                       row['location'] || row['terminal'] || row['yard'] || 'Unknown';
+          
+          const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || 
+                            row['EMPTY/LADEN'] || row['empty laden'] || row['status'] || 
+                            row['container status'] || '';
+          
+          // Enhanced POL (Port of Loading) mapping - your data shows 'pol' column
           const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] || 
-                      row['discharge port'] || row['loading port'] || row['pol port'] || depot;
+                      row['loading port'] || row['pol port'] || depot;
           
-          // Enhanced POD (Port of Discharge) mapping with better fallbacks
-          const rawPod = row.pod || row['POD'] || row['port of discharge'] || row['destination'] || row['to'] || 
-                         row['discharge port'] || row['delivery port'] || row['pod port'] || row['final destination'] ||
-                         row['dest'] || row['discharge'] || '';
-          // Only use POL as fallback if no POD data exists AND movement suggests internal/transfer
-          const pod = rawPod || (movement.toLowerCase().includes('transfer') || movement.toLowerCase().includes('internal') ? pol : 'Unknown');
+          // Enhanced POD (Port of Discharge) mapping - your data shows 'pod' column
+          const rawPod = row.pod || row['POD'] || row['pofd'] || row['port of discharge'] || row['destination'] || 
+                         row['to'] || row['discharge port'] || row['delivery port'] || row['pod port'] || 
+                         row['final destination'] || row['dest'] || row['discharge'] || '';
+          
+          // Better POD fallback logic - don't use 'Unknown', use actual data or skip
+          const pod = rawPod || (movement.toLowerCase().includes('transfer') || movement.toLowerCase().includes('internal') ? pol : null);
           
           // Debug logging for first few records to see what columns actually exist
           if (index < 5) {
@@ -389,7 +496,7 @@ export async function POST(req: NextRequest) {
             });
           }
           
-          const isEmpty = emptyLaden.toLowerCase().includes('empty');
+          const isEmpty = emptyLaden && emptyLaden.toLowerCase().includes('empty');
           
           // Get unique container analysis for this specific container
           const containerAnalysis = analysisData.uniqueContainers.get(containerNo);
@@ -465,8 +572,8 @@ export async function POST(req: NextRequest) {
             }
           }
           
-          // Skip records where destination is unclear or same as origin
-          if (pod === 'Unknown' || pod === pol) {
+          // Skip records where destination is null or same as origin (but allow valid same-port transfers)
+          if (!pod || pod === pol) {
             return null;
           }
           
@@ -522,9 +629,8 @@ export async function POST(req: NextRequest) {
           optimizationType: row.optimization_type || null
         };
         
-        // Only include records with valid origin, destination (not Unknown), and size
-        if (record.origin && record.destination && record.destination !== 'Unknown' && 
-            record.destination !== record.origin && record.size) {
+        // Include records with valid origin, destination, and size
+        if (record.origin && record.destination && record.destination !== record.origin && record.size) {
           bookingRecords.push(record);
         }
       }
@@ -614,27 +720,71 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Excel upload error:', error);
     
-    // More specific error messages
+    // Force cleanup of any remaining memory
+    if (global.gc) {
+      global.gc();
+    }
+    
+    // More specific error messages based on error type
     let errorMessage = 'Failed to process Excel file';
     let details = '';
+    let suggestion = 'Please ensure your Excel file has sheets named: inventory, booking, kpi (or Vietnamese equivalents) with proper column headers';
+    let statusCode = 500;
     
     if (error instanceof Error) {
       details = error.message;
       
       // Check for common Excel file issues
-      if (error.message.includes('zip')) {
-        errorMessage = 'Invalid Excel file format - file appears corrupted or not a valid Excel file';
-      } else if (error.message.includes('workbook')) {
-        errorMessage = 'Could not read Excel workbook - please ensure it\'s a valid .xlsx or .xls file';
+      if (error.message.includes('zip') || error.message.includes('signature')) {
+        errorMessage = 'Invalid Excel file format - file appears corrupted';
+        suggestion = 'Try saving the file again from Excel or use a different Excel file';
+        statusCode = 400;
+      } else if (error.message.includes('workbook') || error.message.includes('worksheet')) {
+        errorMessage = 'Could not read Excel workbook';
+        suggestion = 'Please ensure it\'s a valid .xlsx or .xls file with readable worksheets';
+        statusCode = 400;
       } else if (error.message.includes('DATABASE_URL')) {
         errorMessage = 'Database connection error';
+        suggestion = 'Database configuration issue - contact administrator';
+        statusCode = 503;
+      } else if (error.message.includes('memory') || error.message.includes('heap')) {
+        errorMessage = 'File too large - memory limit exceeded';
+        suggestion = 'Try uploading a smaller file with fewer rows (max recommended: 10,000 rows)';
+        statusCode = 413;
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Processing timeout - file too complex';
+        suggestion = 'Try uploading a simpler file or split large files into chunks';
+        statusCode = 408;
+      } else if (error.message.includes('JSON') || error.message.includes('parse')) {
+        errorMessage = 'Data processing error';
+        suggestion = 'Check that your Excel file contains valid data without special characters in headers';
+        statusCode = 400;
       }
     }
     
-    return NextResponse.json({
-      error: errorMessage,
-      details: details,
-      suggestion: 'Please ensure your Excel file has sheets named: inventory, booking, kpi (or Vietnamese equivalents) with proper column headers'
-    }, { status: 500 });
+    // Ensure we always return a proper JSON response
+    try {
+      return NextResponse.json({
+        success: false,
+        error: errorMessage,
+        details: details,
+        suggestion: suggestion,
+        timestamp: new Date().toISOString(),
+        processingTime: `${((Date.now() - startTime) / 1000).toFixed(2)}s`
+      }, { 
+        status: statusCode,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
+        }
+      });
+    } catch (jsonError) {
+      // Last resort - return plain text if JSON serialization fails
+      console.error('Failed to serialize error response:', jsonError);
+      return new Response(`Error: ${errorMessage}. Details: ${details}`, {
+        status: statusCode,
+        headers: { 'Content-Type': 'text/plain' }
+      });
+    }
   }
 }

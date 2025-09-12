@@ -11,6 +11,130 @@ async function getPrisma() {
 }
 
 // ---- Helpers ----
+async function generateEmptyContainerProposals(bookings: any[]) {
+  const proposals: any[] = [];
+  let proposalId = 1000; // Start empty container proposals at E1000
+  
+  // Filter for empty containers with urgent optimization needs
+  const urgentEmptyContainers = bookings.filter((b: any) => 
+    b.emptyLaden && b.emptyLaden.toLowerCase().includes('empty') &&
+    b.optimizationType === 'urgent-relocation' &&
+    b.optimizationScore >= 85
+  );
+  
+  // Group by depot to find locations with high empty concentrations
+  const depotEmptyCount = new Map<string, { containers: any[], totalCount: number }>();
+  
+  urgentEmptyContainers.forEach(container => {
+    const depot = container.depot || 'Unknown';
+    if (!depotEmptyCount.has(depot)) {
+      depotEmptyCount.set(depot, { containers: [], totalCount: 0 });
+    }
+    const depotData = depotEmptyCount.get(depot)!;
+    depotData.containers.push(container);
+    depotData.totalCount++;
+  });
+  
+  // Create proposals for depots with high empty container concentrations
+  for (const [depot, data] of depotEmptyCount.entries()) {
+    if (data.totalCount >= 5) { // Threshold for creating proposals
+      // Group by container type
+      const typeGroups = new Map<string, any[]>();
+      data.containers.forEach(container => {
+        const type = container.size || '20GP';
+        if (!typeGroups.has(type)) {
+          typeGroups.set(type, []);
+        }
+        typeGroups.get(type)!.push(container);
+      });
+      
+      // Create proposals for each type
+      for (const [containerType, containers] of typeGroups.entries()) {
+        if (containers.length >= 3) { // Minimum 3 containers for a relocation proposal
+          // Find best destination (analyze where laden containers of same type go)
+          const ladenDestinations = bookings
+            .filter(b => 
+              b.emptyLaden && b.emptyLaden.toLowerCase().includes('laden') &&
+              b.size === containerType
+            )
+            .reduce((acc: Map<string, number>, b: any) => {
+              const dest = b.destination || b.origin;
+              acc.set(dest, (acc.get(dest) || 0) + 1);
+              return acc;
+            }, new Map<string, number>());
+          
+          const bestDestination = ladenDestinations.size > 0 
+            ? Array.from(ladenDestinations.entries())
+                .sort(([,a], [,b]) => b - a)[0][0]
+            : 'VNSGN'; // Default to major port
+          
+          // Calculate potential savings
+          const dailyStorageCost = containers.length * 15; // $15 per container per day
+          const avgDwellTime = containers.reduce((sum, c) => {
+            const containerAnalysis = c.containerAnalysis || {};
+            return sum + (containerAnalysis.dwellTime || 30);
+          }, 0) / containers.length;
+          
+          const estimatedSavings = dailyStorageCost * Math.max(avgDwellTime - 7, 0); // Savings if relocated within 7 days
+          
+          proposals.push({
+            id: `E${String(proposalId++).padStart(4, "0")}`,
+            route: `${depot} → ${bestDestination}`,
+            size: containerType,
+            qty: containers.length,
+            reason: `Urgent empty container relocation - ${containers.length} ${containerType} containers stuck at ${depot} for avg ${Math.round(avgDwellTime)} days`,
+            status: "draft" as const,
+            estCost: containers.length * 200, // Estimated $200 per container transport
+            benefit: Math.round(estimatedSavings)
+          });
+        }
+      }
+    }
+  }
+  
+  // Add high-frequency route optimization proposals
+  const routeAnalysis = new Map<string, { count: number, emptyCount: number, types: Set<string> }>();
+  
+  bookings.forEach(b => {
+    if (b.origin && b.destination && b.origin !== b.destination) {
+      const route = `${b.origin} → ${b.destination}`;
+      if (!routeAnalysis.has(route)) {
+        routeAnalysis.set(route, { count: 0, emptyCount: 0, types: new Set() });
+      }
+      const analysis = routeAnalysis.get(route)!;
+      analysis.count++;
+      analysis.types.add(b.size || '20GP');
+      
+      if (b.emptyLaden && b.emptyLaden.toLowerCase().includes('empty')) {
+        analysis.emptyCount++;
+      }
+    }
+  });
+  
+  // Create proposals for routes with high empty ratios
+  for (const [route, analysis] of routeAnalysis.entries()) {
+    const emptyRatio = analysis.emptyCount / analysis.count;
+    
+    if (analysis.count >= 100 && emptyRatio > 0.3) { // High volume route with >30% empty containers
+      const [origin, destination] = route.split(' → ');
+      const mainType = Array.from(analysis.types)[0] || '20GP';
+      
+      proposals.push({
+        id: `R${String(proposalId++).padStart(4, "0")}`,
+        route: `${destination} → ${origin}`, // Reverse route for empty repositioning
+        size: mainType,
+        qty: Math.round(analysis.emptyCount * 0.5), // Propose repositioning 50% of empties
+        reason: `High-frequency route optimization - ${Math.round(emptyRatio * 100)}% empty containers on ${route} (${analysis.count} total movements)`,
+        status: "draft" as const,
+        estCost: Math.round(analysis.emptyCount * 0.5) * 180, // Estimated $180 per container for backhaul
+        benefit: Math.round(analysis.emptyCount * 0.5) * 120 // Estimated $120 per container savings
+      });
+    }
+  }
+  
+  return proposals;
+}
+
 function computeProposals(inventory: {port:string; type:string; stock:number}[],
                           bookings: {destination:string; size:string; qty:number}[]) {
   // demand by (port,type)
@@ -187,14 +311,24 @@ export async function recomputeProposals() {
 
   const aggBookings = bookings.map((b: any) => ({ destination: b.destination, size: b.size, qty: b.qty }));
   const inv = inventory.map((i: any) => ({ port: i.port, type: i.type, stock: i.stock }));
-  const proposals = computeProposals(inv, aggBookings);
+  
+  // Generate traditional surplus/deficit proposals
+  const traditionalProposals = computeProposals(inv, aggBookings);
+  
+  // Generate empty container optimization proposals
+  const emptyContainerProposals = await generateEmptyContainerProposals(bookings);
+  
+  // Combine all proposals
+  const allProposals = [...traditionalProposals, ...emptyContainerProposals];
 
   await prisma.proposal.deleteMany({});
-  if (proposals.length) {
+  if (allProposals.length) {
     await prisma.proposal.createMany({
-      data: proposals.map(p => ({
+      data: allProposals.map(p => ({
         id: p.id, route: p.route, size: p.size, qty: p.qty,
-        reason: p.reason, status: p.status
+        reason: p.reason, status: p.status,
+        estCost: p.estCost || null,
+        benefit: p.benefit || null
       }))
     });
   }

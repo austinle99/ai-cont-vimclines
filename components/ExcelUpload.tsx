@@ -31,21 +31,50 @@ const ExcelUpload = () => {
       const response = await fetch('/api/upload-excel', {
         method: 'POST',
         body: formData,
+        // Add timeout for large files
+        signal: AbortSignal.timeout(300000) // 5 minute timeout for large files
       });
 
-      // Check if response is JSON
+      // Enhanced JSON parsing with better error handling
       const contentType = response.headers.get('content-type');
       let result;
       
       if (contentType && contentType.includes('application/json')) {
-        result = await response.json();
+        try {
+          result = await response.json();
+        } catch (jsonError) {
+          // JSON parsing failed - likely truncated or malformed response
+          const text = await response.text();
+          result = { 
+            error: 'Invalid JSON response from server', 
+            details: `Response appears corrupted. Status: ${response.status}. Content preview: ${text.substring(0, 200)}...` 
+          };
+        }
       } else {
-        // Server returned HTML error page
+        // Server returned non-JSON response (HTML error page, timeout, etc.)
         const text = await response.text();
-        result = { 
-          error: 'Server error - received HTML instead of JSON', 
-          details: text.substring(0, 200) + '...' 
-        };
+        const isTimeout = text.includes('504') || text.includes('timeout') || text.includes('Time-out');
+        const isMemory = text.includes('memory') || text.includes('heap') || text.includes('allocation');
+        
+        if (isTimeout) {
+          result = { 
+            error: 'Upload timeout - File too large or server overloaded', 
+            details: 'Try uploading a smaller file or fewer records at once',
+            suggestion: 'Consider splitting your Excel file into smaller chunks with fewer rows'
+          };
+        } else if (isMemory) {
+          result = { 
+            error: 'Server memory limit exceeded', 
+            details: 'Your Excel file is too large for the server to process',
+            suggestion: 'Try uploading a file with fewer rows or optimize the data'
+          };
+        } else {
+          result = { 
+            error: 'Server error - Non-JSON response received', 
+            details: `Status: ${response.status}. Content preview: ${text.substring(0, 200)}...`,
+            suggestion: 'Check server logs for detailed error information'
+          };
+        }
       }
 
       if (response.ok && result.success) {
@@ -55,10 +84,25 @@ const ExcelUpload = () => {
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
       } else {
-        setMessage(`❌ Error: ${result.error}${result.details ? '\n' + result.details : ''}`);
+        const errorParts = [`❌ Error: ${result.error}`];
+        if (result.details) errorParts.push(`📝 Details: ${result.details}`);
+        if (result.suggestion) errorParts.push(`💡 Suggestion: ${result.suggestion}`);
+        if (result.fileInfo) errorParts.push(`📄 File: ${result.fileInfo.name} (${result.fileInfo.size})`);
+        setMessage(errorParts.join('\n\n'));
       }
     } catch (error) {
-      setMessage(`❌ Upload failed: ${error}`);
+      console.error('Upload error:', error);
+      
+      // Enhanced error handling for different error types
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        setMessage(`❌ Upload timeout: Your file is too large or the server is busy. Try uploading a smaller file with fewer rows.`);
+      } else if (error instanceof TypeError && error.message.includes('fetch')) {
+        setMessage(`❌ Network error: Unable to connect to server. Check your internet connection and try again.`);
+      } else if (error instanceof SyntaxError && error.message.includes('JSON')) {
+        setMessage(`❌ Server response error: The server returned invalid data. This usually happens with very large files. Try uploading a smaller file.`);
+      } else {
+        setMessage(`❌ Upload failed: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
+      }
     } finally {
       setUploading(false);
     }
