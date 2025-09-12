@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as ExcelJS from 'exceljs';
 
+// This is a server-side API route for handling Excel file uploads.
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   console.log('🚀 Starting Excel upload processing...');
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json({ 
-        error: 'File too large', 
+        error: 'File too large',
         details: `File size ${(file.size / 1024 / 1024).toFixed(2)}MB exceeds limit of ${MAX_FILE_SIZE / 1024 / 1024}MB`
       }, { status: 413 });
     }
@@ -313,7 +314,7 @@ export async function POST(req: NextRequest) {
                              movement.toLowerCase().includes('in') || 
                              movement.toLowerCase().includes('out'));
         })
-        .map((row: any) => {
+        .map((row: any, index: number) => {
           const containerNo = row['container no.'] || row['CONTAINER NO.'] || row['container no'] || row['containerno'] || '';
           const typeSize = row['type size'] || row['TYPE SIZE'] || row['type/size'] || row['container size'] || row['size'] || '20GP';
           const movement = row.movement || row['MOVEMENT'] || row['move type'] || row['movetype'] || '';
