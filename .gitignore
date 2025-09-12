@@ -18,6 +18,9 @@
 # Database
 prisma/dev.db*
 
+# TypeScript
+tsconfig.tsbuildinfo
+
 # OS generated files
 .DS_Store
 Thumbs.db
