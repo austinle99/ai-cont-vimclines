@@ -239,6 +239,95 @@ export async function recomputeKPI() {
 }
 
 // ---- Alert System ----
+export async function resetAllSuggestions() {
+  console.log('🔄 Resetting all suggestions and computed data...');
+  const prisma = await getPrisma();
+  
+  try {
+    await prisma.$transaction([
+      // Clear all generated suggestions
+      prisma.proposal.deleteMany({}),
+      prisma.alert.deleteMany({}),
+      
+      // Clear ML training data (optional - keeps learning history)
+      // prisma.mLTrainingData.deleteMany({}),
+      // prisma.suggestionFeedback.deleteMany({}),
+      
+      // Reset KPI to default values
+      prisma.kPI.deleteMany({})
+    ]);
+    
+    console.log('✅ All suggestions cleared successfully');
+    
+    // Revalidate affected pages
+    revalidatePath("/");
+    revalidatePath("/proposals");
+    revalidatePath("/reports");
+    revalidatePath("/notifications");
+    
+    return { success: true, message: 'All suggestions have been reset' };
+  } catch (error) {
+    console.error('❌ Error resetting suggestions:', error);
+    throw error;
+  }
+}
+
+export async function resetSuggestionsAndKeepData() {
+  console.log('🔄 Resetting suggestions but keeping data...');
+  const prisma = await getPrisma();
+  
+  try {
+    await prisma.$transaction([
+      // Clear only computed suggestions, keep base data
+      prisma.proposal.deleteMany({}),
+      prisma.alert.deleteMany({ where: { status: 'active' } }),
+    ]);
+    
+    // Recompute from existing data
+    await recomputeProposals();
+    await recomputeKPI();
+    
+    console.log('✅ Suggestions reset and recomputed from existing data');
+    return { success: true, message: 'Suggestions reset and recomputed' };
+  } catch (error) {
+    console.error('❌ Error resetting suggestions:', error);
+    throw error;
+  }
+}
+
+export async function clearAllDataAndSuggestions() {
+  console.log('🗑️ Clearing ALL data and suggestions...');
+  const prisma = await getPrisma();
+  
+  try {
+    await prisma.$transaction([
+      // Clear all data
+      prisma.inventory.deleteMany({}),
+      prisma.booking.deleteMany({}),
+      prisma.proposal.deleteMany({}),
+      prisma.alert.deleteMany({}),
+      prisma.kPI.deleteMany({}),
+      
+      // Optional: Clear ML data (uncomment if you want full reset)
+      // prisma.mLTrainingData.deleteMany({}),
+      // prisma.suggestionFeedback.deleteMany({}),
+    ]);
+    
+    console.log('✅ All data and suggestions cleared');
+    
+    // Revalidate all pages
+    revalidatePath("/");
+    revalidatePath("/proposals");
+    revalidatePath("/reports");
+    revalidatePath("/notifications");
+    
+    return { success: true, message: 'All data and suggestions cleared' };
+  } catch (error) {
+    console.error('❌ Error clearing data:', error);
+    throw error;
+  }
+}
+
 export async function generateAlerts() {
   const prisma = await getPrisma();
   const inventory = await prisma.inventory.findMany();

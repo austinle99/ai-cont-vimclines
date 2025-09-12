@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { importExcel, recomputeProposals, generateAlerts } from "@/app/action";
+import { importExcel, recomputeProposals, generateAlerts, resetAllSuggestions, resetSuggestionsAndKeepData, clearAllDataAndSuggestions } from "@/app/action";
 import Sidebar from "@/components/Sidebar";
 import Chatbot from "@/components/Chatbot";
 
@@ -159,7 +159,7 @@ export default function Page() {
         
         <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
           <h3 className="text-lg font-semibold mb-3">🔄 Manual Actions</h3>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <button 
               onClick={async () => {
                 await recomputeProposals();
@@ -179,6 +179,30 @@ export default function Page() {
               type="button"
             >
               Generate Alerts
+            </button>
+            <button 
+              onClick={async () => {
+                if (confirm('Reset suggestions but keep inventory/booking data?')) {
+                  await resetSuggestionsAndKeepData();
+                  window.location.reload();
+                }
+              }}
+              className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500"
+              type="button"
+            >
+              Reset Suggestions
+            </button>
+            <button 
+              onClick={async () => {
+                if (confirm('⚠️ Clear ALL data and suggestions? This cannot be undone!')) {
+                  await clearAllDataAndSuggestions();
+                  window.location.reload();
+                }
+              }}
+              className="px-3 py-2 rounded bg-red-600 hover:bg-red-500"
+              type="button"
+            >
+              Clear All Data
             </button>
           </div>
         </div>

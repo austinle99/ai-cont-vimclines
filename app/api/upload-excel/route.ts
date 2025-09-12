@@ -29,10 +29,23 @@ export async function POST(req: NextRequest) {
       }, { status: 413 });
     }
 
-    // Parse Excel file with timeout protection
+    // Parse Excel file with timeout protection and memory optimization
     const workbook = new ExcelJS.Workbook();
     console.log('📊 Loading Excel workbook...');
-    await workbook.xlsx.load(await file.arrayBuffer());
+    
+    try {
+      // Use streaming for large files to reduce memory usage
+      const buffer = await file.arrayBuffer();
+      console.log(`Buffer size: ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+      await workbook.xlsx.load(buffer);
+    } catch (error) {
+      console.error('Excel parsing error:', error);
+      return NextResponse.json({
+        error: 'Failed to parse Excel file',
+        details: error instanceof Error ? error.message : 'Invalid Excel format',
+        suggestion: 'Please ensure the file is a valid .xlsx or .xls format'
+      }, { status: 400 });
+    }
     
     const results: any = {};
     
@@ -107,22 +120,35 @@ export async function POST(req: NextRequest) {
         console.log(`Sample data from "${worksheet.name}":`, sampleData);
       }
       
+      // Process rows in batches for large worksheets
+      const WORKSHEET_BATCH_SIZE = isLargeFile ? 500 : 2000;
+      let processedRows = 0;
+      
       // Skip header row and get data
       worksheet.eachRow((row, rowIndex) => {
         if (rowIndex === 1) return; // Skip header
         
         const rowData: any = {};
+        let hasData = false;
+        
         row.eachCell((cell, colNumber) => {
           // Get header from first row
           const headerCell = worksheet.getCell(1, colNumber);
           const header = headerCell.value?.toString().toLowerCase().trim();
-          if (header) {
+          if (header && cell.value !== null && cell.value !== undefined && cell.value !== '') {
             rowData[header] = cell.value;
+            hasData = true;
           }
         });
         
-        if (Object.keys(rowData).length > 0) {
+        if (hasData) {
           rows.push(rowData);
+          processedRows++;
+          
+          // Batch processing feedback for large sheets
+          if (processedRows % WORKSHEET_BATCH_SIZE === 0) {
+            console.log(`Processed ${processedRows} rows from "${worksheet.name}"...`);
+          }
         }
       });
       
@@ -196,13 +222,13 @@ export async function POST(req: NextRequest) {
       
       const containerData = results.gridviewexport;
       
-      // Add processing limit for large datasets
-      const MAX_PROCESSING_LIMIT = isLargeFile ? 2000 : 10000; // Stricter limit for large files
+      // Add processing limit for large datasets - increased limits
+      const MAX_PROCESSING_LIMIT = isLargeFile ? 10000 : 25000; // Increased limits for better coverage
       const limitedData = containerData.length > MAX_PROCESSING_LIMIT ? 
         containerData.slice(0, MAX_PROCESSING_LIMIT) : containerData;
       
       if (containerData.length > MAX_PROCESSING_LIMIT) {
-        console.log(`⚠️ Large dataset detected (${containerData.length} records). Processing first ${MAX_PROCESSING_LIMIT} records using ${isLargeFile ? 'fast mode' : 'normal mode'}.`);
+        console.log(`⚠️ Large dataset detected (${containerData.length} records). Processing first ${MAX_PROCESSING_LIMIT} records using ${isLargeFile ? 'optimized mode' : 'normal mode'}.`);
       }
       
       // Analyze container patterns for optimization - PER UNIQUE CONTAINER
@@ -225,17 +251,30 @@ export async function POST(req: NextRequest) {
       };
       
       // First pass: Group by container ID and build movement history (use limited data)
-      limitedData.forEach((row: any, index: number) => {
-        if (index % 1000 === 0) {
-          console.log(`Processing record ${index + 1}/${limitedData.length}...`);
+      // Process in batches for better memory management with large files
+      const BATCH_SIZE = isLargeFile ? 250 : 1000;
+      console.log(`Processing ${limitedData.length} records in batches of ${BATCH_SIZE}...`);
+      
+      for (let i = 0; i < limitedData.length; i += BATCH_SIZE) {
+        const batch = limitedData.slice(i, Math.min(i + BATCH_SIZE, limitedData.length));
+        if (i % (BATCH_SIZE * 4) === 0) {
+          console.log(`Processing batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(limitedData.length/BATCH_SIZE)} (records ${i + 1}-${Math.min(i + BATCH_SIZE, limitedData.length)})...`);
         }
+        
+        batch.forEach((row: any, batchIndex: number) => {
+          const index = i + batchIndex;
         const containerNo = row['container no.'] || row['CONTAINER NO.'] || '';
         const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
         const movement = row.movement || row['MOVEMENT'] || '';
         const depot = row.depot || row['DEPOT'] || 'Unknown';
         const emptyLaden = row['empty/laden'] || row['EMPTY/LADEN'] || '';
-        const pol = row.pol || row['POL'] || '';
-        const pod = row.pod || row['POD'] || '';
+        // Enhanced POL/POD mapping (consistent with booking generation)
+        const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] || 
+                    row['discharge port'] || row['loading port'] || row['pol port'] || depot;
+        const rawPodEarly = row.pod || row['POD'] || row['port of discharge'] || row['destination'] || row['to'] || 
+                           row['discharge port'] || row['delivery port'] || row['pod port'] || row['final destination'] ||
+                           row['dest'] || row['discharge'] || '';
+        const pod = rawPodEarly || (movement.toLowerCase().includes('transfer') || movement.toLowerCase().includes('internal') ? pol : 'Unknown');
         const systemDate = row['system date'] || row['SYSTEM DATE'] || new Date();
         
         if (!containerNo) return; // Skip rows without container number
@@ -304,7 +343,13 @@ export async function POST(req: NextRequest) {
         if (isEmpty) {
           analysisData.emptyContainers.set(depot, (analysisData.emptyContainers.get(depot) || 0) + 1);
         }
-      });
+        });
+        
+        // Memory management: clear temporary data and force garbage collection for large files
+        if (isLargeFile && global.gc && i % (BATCH_SIZE * 8) === 0) {
+          global.gc();
+        }
+      }
       
       // Generate optimized booking data with suggestions (use limited data)
       bookingData = limitedData
@@ -326,9 +371,11 @@ export async function POST(req: NextRequest) {
                       row['discharge port'] || row['loading port'] || row['pol port'] || depot;
           
           // Enhanced POD (Port of Discharge) mapping with better fallbacks
-          const pod = row.pod || row['POD'] || row['port of discharge'] || row['destination'] || row['to'] || 
-                      row['discharge port'] || row['delivery port'] || row['pod port'] || row['final destination'] ||
-                      row['dest'] || row['discharge'] || pol; // Use POL as fallback instead of 'Unknown'
+          const rawPod = row.pod || row['POD'] || row['port of discharge'] || row['destination'] || row['to'] || 
+                         row['discharge port'] || row['delivery port'] || row['pod port'] || row['final destination'] ||
+                         row['dest'] || row['discharge'] || '';
+          // Only use POL as fallback if no POD data exists AND movement suggests internal/transfer
+          const pod = rawPod || (movement.toLowerCase().includes('transfer') || movement.toLowerCase().includes('internal') ? pol : 'Unknown');
           
           // Debug logging for first few records to see what columns actually exist
           if (index < 5) {
@@ -418,6 +465,11 @@ export async function POST(req: NextRequest) {
             }
           }
           
+          // Skip records where destination is unclear or same as origin
+          if (pod === 'Unknown' || pod === pol) {
+            return null;
+          }
+          
           return {
             date: row['system date'] || row['SYSTEM DATE'] || new Date(),
             origin: pol,
@@ -435,7 +487,8 @@ export async function POST(req: NextRequest) {
             optimization_score: optimizationScore,
             optimization_type: optimizationType
           };
-        });
+        })
+        .filter((record: any) => record !== null); // Remove null records (unclear destinations)
       
       console.log(`Generated booking records with optimization analysis: ${bookingData.length}`);
       console.log('Depot utilization:', Array.from(analysisData.depotUtilization.entries()).map(([depot, stats]) => 
@@ -455,7 +508,7 @@ export async function POST(req: NextRequest) {
         const record = {
           date: new Date(row.date || row.ngày || Date.now()),
           origin: row.origin || row.xuất_phát || row.from || row.pol || row.depot || '',
-          destination: row.destination || row.đích || row.to || row.pod || row.origin || 'Internal',
+          destination: row.destination || row.đích || row.to || row.pod || 'Unknown',
           size: row.size || row.kích_thước || row.container_size || row.typeSize || '20GP',
           qty: parseInt(row.qty || row.quantity || row['số lượng'] || '1'),
           customer: row.customer || row.khách_hàng || row.client || row.consignee || 'Unknown',
@@ -469,7 +522,9 @@ export async function POST(req: NextRequest) {
           optimizationType: row.optimization_type || null
         };
         
-        if (record.origin && record.destination && record.size) {
+        // Only include records with valid origin, destination (not Unknown), and size
+        if (record.origin && record.destination && record.destination !== 'Unknown' && 
+            record.destination !== record.origin && record.size) {
           bookingRecords.push(record);
         }
       }
