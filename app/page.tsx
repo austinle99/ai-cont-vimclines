@@ -5,6 +5,7 @@ import Card from "@/components/Card";
 import ProgressBar from "@/components/ProgressBar";
 import Sidebar from "@/components/Sidebar";
 import Chatbot from "@/components/Chatbot";
+import SystemHealthWidget from "@/components/SystemHealthWidget";
 import Link from "next/link";
 
 interface InventoryItem {
@@ -31,10 +32,19 @@ interface Alert {
   status: string;
 }
 
+interface SystemHealth {
+  ml_system: boolean;
+  lstm_system: boolean;
+  or_tools_system: boolean;
+  python_env: boolean;
+  last_check: Date;
+}
+
 export default function Page() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -190,6 +200,9 @@ export default function Page() {
             </Link>
           </div>
         )}
+
+        {/* System Health Widget */}
+        <SystemHealthWidget />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {inventory.map((i: InventoryItem) => (

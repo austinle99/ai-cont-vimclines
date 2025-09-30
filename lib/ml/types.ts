@@ -20,6 +20,19 @@ export interface SuggestionCandidate {
     port?: string;
     containerType?: string;
     targetValue?: number;
+    source?: string;
+    method?: string;
+    forecastMethod?: string;
+    confidence?: number;
+    ports?: string[];
+    predictedCount?: number;
+    avgForecast?: number;
+    totalForecast?: number;
+    pattern?: string;
+    trendDirection?: string;
+    predictedIncrease?: number;
+    daysAhead?: number;
+    predictedTotal?: number;
   };
 }
 

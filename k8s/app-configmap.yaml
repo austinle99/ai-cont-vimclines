@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: ai-cont
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  # Update this with your actual domain or load balancer
+  HOSTNAME: "0.0.0.0"

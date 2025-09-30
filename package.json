@@ -12,11 +12,10 @@
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.1",
     "@prisma/adapter-pg": "^6.15.0",
     "@prisma/client": "^6.14.0",
+    "@tensorflow/tfjs": "^4.22.0",
     "@types/react-dom": "^19.1.7",
-    "@vercel/postgres": "^0.10.0",
     "exceljs": "^4.4.0",
     "ml-matrix": "^6.10.0",
     "multer": "^2.0.2",
