@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-cont-rag-service
+  namespace: ai-cont
+  labels:
+    app: ai-cont-rag-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-cont-rag-service
+  template:
+    metadata:
+      labels:
+        app: ai-cont-rag-service
+    spec:
+      containers:
+        - name: ai-cont-rag-service
+          image: ai-cont-rag:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_HOST
+              value: ai-cont-postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: LLM_MODEL_NAME
+              value: meta-llama/Meta-Llama-3-8B-Instruct
+            - name: EMBED_MODEL_NAME
+              value: sentence-transformers/all-MiniLM-L6-v2
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "2000m"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+

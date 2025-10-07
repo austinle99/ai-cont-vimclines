@@ -37,6 +37,7 @@ An intelligent container inventory and optimization platform powered by machine 
 - Node.js 18+
 - PostgreSQL 15+ (or use Docker Compose)
 - npm or yarn package manager
+- NVIDIA GPU with CUDA 12.1-compatible drivers (required for the RAG microservice)
 
 ## 🔧 Installation
 
@@ -87,7 +88,12 @@ An intelligent container inventory and optimization platform powered by machine 
    cp .env.example .env
    ```
 
-3. **Start all services**
+3. **Build GPU-enabled RAG image** (requires NVIDIA drivers on the host)
+   ```bash
+   docker compose build rag-service
+   ```
+
+4. **Start all services**
    ```bash
    docker-compose up -d
    ```
@@ -96,6 +102,12 @@ An intelligent container inventory and optimization platform powered by machine 
    - PostgreSQL database on port 5432
    - Next.js application on port 3000
    - pgAdmin on port 5050 (optional, for database management)
+   - Python RAG service on port 8000 (requires GPU access)
+
+5. **Start only the RAG microservice** (after the build step above)
+   ```bash
+   docker compose up -d rag-service
+   ```
 
 4. **Access the application**
    - Main App: [http://localhost:3000](http://localhost:3000)
@@ -143,6 +155,25 @@ node test-empty-proposals.js
 # Analyze existing data
 node analyze-existing-data.js
 ```
+
+## 🧠 Retrieval-Augmented Generation Service
+
+- **Code**: `python_optimization/rag_service.py`
+- **Runtime**: FastAPI served via Uvicorn (GPU accelerated with CUDA 12.1)
+- **Endpoints**:
+  - `POST /embed` – generate embeddings and optionally persist to PostgreSQL
+  - `POST /query` – perform FAISS similarity search over stored vectors
+  - `POST /chat` – retrieve relevant context and stream an answer from the configured LLM
+- **Environment**: set `LLM_MODEL_NAME`, `EMBED_MODEL_NAME`, and PostgreSQL connection variables as needed.
+
+Build and run locally with Docker Compose:
+
+```bash
+docker compose build rag-service
+docker compose up -d rag-service
+```
+
+Kubernetes manifests are available under `k8s/` (`rag-service-deployment.yaml` and `rag-service-service.yaml`) with GPU requests (`nvidia.com/gpu: 1`).
 
 ## 🗂️ Project Structure
 

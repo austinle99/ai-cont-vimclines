@@ -79,6 +79,22 @@ python python_optimization/container_optimizer.py --help
 ✅ All APIs responding
 ```
 
+### **Level 5: Retrieval-Augmented Generation (GPU Required)**
+```bash
+🧠 RAG Requirements:
+✅ NVIDIA GPU with CUDA 12.1+ drivers (host level)
+✅ Docker Engine + NVIDIA Container Toolkit
+✅ `docker compose build rag-service`
+✅ `docker compose up -d rag-service`
+✅ Access to PostgreSQL (loads persisted context)
+```
+
+**Kubernetes GPU deployment:**
+```bash
+kubectl apply -k k8s/
+# rag-service-deployment.yaml requests nvidia.com/gpu: 1
+```
+
 ## 🚀 **Quick System Diagnosis**
 
 ### **Check Current Status:**
