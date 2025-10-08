@@ -27,3 +27,6 @@ Thumbs.db
 
 # Windows problematic files
 nul
+
+# Kubernetes secrets with real credentials
+k8s/*-secrets.yaml
