@@ -13,7 +13,9 @@ An intelligent container inventory and optimization platform powered by machine 
 - **AI Chatbot Assistant** - Conversational interface for querying data and performing actions
 
 ### Machine Learning Components
+- **GBR + LSTM Ensemble System** - Hybrid machine learning approach combining Gradient Boosting Regression with LSTM neural networks for superior prediction accuracy
 - **LSTM Forecasting** - Time-series prediction for container demand using TensorFlow.js
+- **Gradient Boosting Regressor (GBR)** - Python-based sklearn model with 26+ engineered features for demand prediction
 - **Feature Extraction & Scoring** - ML-based suggestion ranking and optimization scoring
 - **Feedback Loop** - Continuous learning from user actions to improve recommendations
 - **OR-Tools Integration** - Advanced optimization algorithms for route planning
@@ -28,13 +30,17 @@ An intelligent container inventory and optimization platform powered by machine 
 - **Frontend**: Next.js 14, React 18, TailwindCSS
 - **Backend**: Next.js API Routes, TypeScript
 - **Database**: PostgreSQL 15 with Prisma ORM
-- **ML/AI**: TensorFlow.js, ml-matrix, simple-statistics
+- **ML/AI**:
+  - **Python ML**: scikit-learn (GBR), pandas, numpy, joblib
+  - **JavaScript ML**: TensorFlow.js (LSTM), ml-matrix, simple-statistics
+  - **Ensemble**: Hybrid GBR + LSTM prediction system
 - **Containerization**: Docker, Docker Compose
 - **File Processing**: ExcelJS for Excel file parsing
 
 ## 📋 Prerequisites
 
 - Node.js 18+
+- Python 3.8+ (for GBR machine learning models)
 - PostgreSQL 15+ (or use Docker Compose)
 - npm or yarn package manager
 
@@ -53,7 +59,14 @@ An intelligent container inventory and optimization platform powered by machine 
    npm install
    ```
 
-3. **Set up environment variables**
+3. **Install Python ML dependencies**
+   ```bash
+   pip install -r python_ml/requirements.txt
+   # Or verify installation:
+   python verify-python-deps.py
+   ```
+
+4. **Set up environment variables**
 
    Create a `.env` file in the root directory:
    ```env
@@ -61,13 +74,13 @@ An intelligent container inventory and optimization platform powered by machine 
    DIRECT_URL="postgresql://postgres:postgres@localhost:5432/ai_cont_db"
    ```
 
-4. **Set up the database**
+5. **Set up the database**
    ```bash
    npm run db:migrate
    npm run db:seed
    ```
 
-5. **Run the development server**
+6. **Run the development server**
    ```bash
    npm run dev
    ```
@@ -131,6 +144,9 @@ An intelligent container inventory and optimization platform powered by machine 
 Run built-in test scripts:
 
 ```bash
+# Test GBR + LSTM ensemble system
+node test-gbr-ensemble.js
+
 # Test prediction models
 node test-predictions.js
 
@@ -142,6 +158,9 @@ node test-empty-proposals.js
 
 # Analyze existing data
 node analyze-existing-data.js
+
+# Verify Python dependencies
+python verify-python-deps.py
 ```
 
 ## 🗂️ Project Structure
@@ -163,8 +182,17 @@ ai-cont-noapi/
 │   │   └── integratedOptimizationEngine.ts
 │   ├── optimization/     # OR-Tools optimization
 │   └── testing/          # Test utilities
+├── python_ml/            # Python ML components
+│   ├── gbr_predictor.py  # GBR model implementation
+│   ├── requirements.txt  # Python dependencies
+│   └── train_gbr.py      # Training scripts
+├── models/               # Trained model files
+│   ├── lstm_empty_containers.json  # LSTM weights
+│   └── gbr_model_*.pkl   # GBR serialized models
 ├── prisma/               # Database schema & migrations
 ├── components/           # React components
+├── test-gbr-ensemble.js  # GBR + LSTM ensemble tests
+├── verify-python-deps.py # Python dependency checker
 ├── Dockerfile            # Multi-stage production build
 ├── docker-compose.yml    # Docker orchestration
 └── package.json          # Dependencies & scripts
@@ -197,6 +225,58 @@ npm run db:seed       # Seed database
 - `GET /api/kpi` - Fetch KPI metrics
 - `POST /api/ml/train` - Trigger ML model training
 - `GET /api/system/health` - System health check
+
+## 🤖 GBR + LSTM Ensemble ML System
+
+The system uses a hybrid approach combining two complementary machine learning models:
+
+### Gradient Boosting Regressor (GBR)
+- **Purpose**: Short-term demand prediction with interpretable features
+- **Implementation**: Python scikit-learn
+- **Features**: 26+ engineered features including:
+  - Dwell time patterns
+  - Depot empty ratios
+  - Route frequency
+  - Historical demand trends
+  - Seasonal patterns
+- **Performance**: R² score typically 0.75-0.85+
+- **Best for**: 1-7 day predictions with high accuracy
+
+### LSTM Neural Network
+- **Purpose**: Long-term time-series forecasting
+- **Implementation**: TensorFlow.js
+- **Features**: Sequential pattern recognition across time
+- **Performance**: Captures seasonal trends and cyclic patterns
+- **Best for**: 7-14+ day predictions and trend analysis
+
+### Ensemble Strategy
+The system intelligently combines both models:
+- **Weighted average** based on prediction horizon
+- **Confidence scoring** from individual model performance
+- **Risk level assessment** (high/medium/low)
+- **Fallback mechanisms** if one model underperforms
+
+### Training the Models
+
+```bash
+# Train GBR model (requires Python dependencies)
+node test-gbr-ensemble.js
+
+# LSTM training happens automatically on data upload
+# Or trigger manually via: GET /api/lstm-training-status
+```
+
+### Using Predictions
+
+```bash
+# Get 7-day predictions
+curl "http://localhost:3000/api/predictions?days=7"
+
+# Filter by port and container type
+curl "http://localhost:3000/api/predictions?days=7&port=VNHPH&type=20GP"
+```
+
+For detailed implementation guide, see [NEXT_STEPS_ROADMAP.md](NEXT_STEPS_ROADMAP.md)
 
 ## 🤝 Contributing
 
