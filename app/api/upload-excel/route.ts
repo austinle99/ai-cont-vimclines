@@ -233,7 +233,9 @@ export async function POST(req: NextRequest) {
       // Group containers by port and type to create inventory with empty/laden breakdown
       const containerGroups: { [key: string]: { port: string; type: string; count: number; emptyCount: number; ladenCount: number } } = {};
       results.gridviewexport.forEach((row: any) => {
-        const port = row.depot || row.port || row.terminal || 'Unknown';
+        // Enhanced depot mapping - use actual depot codes, terminal codes, or descriptive fallback
+        const port = row['depot code'] || row['terminal code'] || row.depot || row['DEPOT'] ||
+                    row.terminal || row.port || row.location || 'Not Specified';
         const type = row['type size'] || row.type || '20GP';
         const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || '';
         const key = `${port}_${type}`;
@@ -337,12 +339,13 @@ export async function POST(req: NextRequest) {
           console.log(`Processing batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(limitedData.length/BATCH_SIZE)} (records ${i + 1}-${Math.min(i + BATCH_SIZE, limitedData.length)})...`);
         }
         
-        batch.forEach((row: any, batchIndex: number) => {
-          const index = i + batchIndex;
+        batch.forEach((row: any) => {
         const containerNo = row['container no.'] || row['CONTAINER NO.'] || '';
         const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
         const movement = row.movement || row['MOVEMENT'] || '';
-        const depot = row.depot || row['DEPOT'] || 'Unknown';
+        // Enhanced depot mapping - prioritize depot code, then terminal code, then fallback
+        const depot = row['depot code'] || row['terminal code'] || row.depot || row['DEPOT'] ||
+                     row.terminal || row.location || 'Not Specified';
         const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || '';
         // Enhanced POL/POD mapping (consistent with booking generation)
         const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] || 
@@ -464,9 +467,9 @@ export async function POST(req: NextRequest) {
           const typeSize = row['type size'] || row['TYPE SIZE'] || row['type/size'] || row['container size'] || row['size'] || '20GP';
           const movement = row.movement || row['MOVEMENT'] || row['movement code'] || row['move type'] || row['movetype'] || '';
           
-          // Enhanced depot/location mapping
-          const depot = row.depot || row['DEPOT'] || row['depot code'] || row['terminal code'] || 
-                       row['location'] || row['terminal'] || row['yard'] || 'Unknown';
+          // Enhanced depot/location mapping - prioritize actual codes over generic fallback
+          const depot = row['depot code'] || row['terminal code'] || row.depot || row['DEPOT'] ||
+                       row.terminal || row.location || row['yard'] || 'Not Specified';
           
           const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || 
                             row['EMPTY/LADEN'] || row['empty laden'] || row['status'] || 
