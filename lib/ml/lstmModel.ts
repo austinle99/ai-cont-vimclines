@@ -91,7 +91,7 @@ export class LSTMEmptyContainerModel {
     model.compile({
       optimizer: tf.train.adam(this.config.learningRate),
       loss: 'meanSquaredError',
-      metrics: ['meanAbsoluteError']
+      metrics: ['mae'] // Use 'mae' instead of 'meanAbsoluteError'
     });
 
     this.model = model;
