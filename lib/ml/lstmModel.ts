@@ -1,5 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import { ProcessedTimeSeriesData } from './lstmPreprocessor';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface LSTMModelConfig {
   sequenceLength: number;
@@ -297,7 +299,7 @@ export class LSTMEmptyContainerModel {
   }
 
   /**
-   * Save model to local storage or indexedDB
+   * Save model to file system
    */
   async saveModel(modelName: string = 'lstm-empty-container-model'): Promise<void> {
     if (!this.model) {
@@ -305,14 +307,24 @@ export class LSTMEmptyContainerModel {
     }
 
     try {
-      await this.model.save(`indexeddb://${modelName}`);
-      
-      // Save scaling parameters separately
-      if (this.scalingParams) {
-        localStorage.setItem(`${modelName}-scaling`, JSON.stringify(this.scalingParams));
+      const modelPath = path.join(process.cwd(), 'models', 'lstm_empty_containers');
+
+      // Ensure directory exists
+      if (!fs.existsSync(modelPath)) {
+        fs.mkdirSync(modelPath, { recursive: true });
       }
-      
-      console.log(`✅ Model saved as ${modelName}`);
+
+      // Save model using file:// protocol
+      const savePath = `file://${modelPath}`;
+      await this.model.save(savePath);
+
+      // Save scaling parameters to JSON file
+      if (this.scalingParams) {
+        const scalingPath = path.join(modelPath, 'scaling_params.json');
+        fs.writeFileSync(scalingPath, JSON.stringify(this.scalingParams, null, 2));
+      }
+
+      console.log(`✅ Model saved to ${modelPath}`);
     } catch (error) {
       console.error('❌ Error saving model:', error);
       throw error;
@@ -320,19 +332,30 @@ export class LSTMEmptyContainerModel {
   }
 
   /**
-   * Load model from local storage or indexedDB
+   * Load model from file system
    */
   async loadModel(modelName: string = 'lstm-empty-container-model'): Promise<void> {
     try {
-      this.model = await tf.loadLayersModel(`indexeddb://${modelName}`);
-      
-      // Load scaling parameters
-      const scalingData = localStorage.getItem(`${modelName}-scaling`);
-      if (scalingData) {
+      const modelPath = path.join(process.cwd(), 'models', 'lstm_empty_containers');
+      const modelJsonPath = path.join(modelPath, 'model.json');
+
+      // Check if model file exists
+      if (!fs.existsSync(modelJsonPath)) {
+        throw new Error(`Model not found at ${modelJsonPath}`);
+      }
+
+      // Load model using file:// protocol
+      const loadPath = `file://${modelJsonPath}`;
+      this.model = await tf.loadLayersModel(loadPath);
+
+      // Load scaling parameters from JSON file
+      const scalingPath = path.join(modelPath, 'scaling_params.json');
+      if (fs.existsSync(scalingPath)) {
+        const scalingData = fs.readFileSync(scalingPath, 'utf-8');
         this.scalingParams = JSON.parse(scalingData);
       }
-      
-      console.log(`✅ Model loaded: ${modelName}`);
+
+      console.log(`✅ Model loaded from ${modelPath}`);
     } catch (error) {
       console.error('❌ Error loading model:', error);
       throw error;

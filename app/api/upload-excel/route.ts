@@ -292,7 +292,10 @@ export async function POST(req: NextRequest) {
 
     // Process Booking data - Handle both direct booking sheets and GridViewExport
     let bookingData = results.booking || results.bookings || results['đặt chỗ'];
-    
+
+    // Declare analysisData at higher scope for access in response
+    let analysisData: any = null;
+
     // If no direct booking sheet, try to extract from GridViewExport with optimization analysis
     if (!bookingData && results.gridviewexport) {
       console.log('Processing bookings from GridViewExport with optimization analysis...');
@@ -311,21 +314,28 @@ export async function POST(req: NextRequest) {
       
       // Analyze container patterns for optimization - PER UNIQUE CONTAINER
       const containerHistory = new Map<string, any[]>(); // containerNo -> movement history
-      const analysisData = {
+      analysisData = {
         emptyContainers: new Map<string, number>(), // location -> empty count
         containerTypes: new Map<string, number>(),  // type -> total count
         movements: new Map<string, number>(),       // depot -> movement count
         routes: new Map<string, number>(),          // pol->pod -> frequency
         depotUtilization: new Map<string, { total: number; empty: number; loaded: number }>(),
-        uniqueContainers: new Map<string, { 
-          latestStatus: string, 
-          currentDepot: string, 
+        uniqueContainers: new Map<string, {
+          latestStatus: string,
+          currentDepot: string,
           typeSize: string,
           totalMovements: number,
           dwellTime: number,
           lastPOL: string,
           lastPOD: string
-        }>()
+        }>(),
+        containerStats: {
+          total: 0,
+          empty: 0,
+          laden: 0,
+          emptyPercentage: 0,
+          warnings: [] as Array<{ severity: string; message: string; impact: string }>
+        }
       };
       
       // First pass: Group by container ID and build movement history (use limited data)
@@ -552,18 +562,18 @@ export async function POST(req: NextRequest) {
           if (!optimization && pol && pod && pol !== pod) {
             const route = `${pol}->${pod}`;
             const routeFreq = analysisData.routes.get(route) || 0;
-            const totalRoutes = Array.from(analysisData.routes.values()).reduce((a, b) => a + b, 0);
+            const totalRoutes = (Array.from(analysisData.routes.values()) as number[]).reduce((a, b) => a + b, 0);
             if (routeFreq > totalRoutes * 0.1) {
               optimization = `High-frequency route ${pol}→${pod} (${routeFreq} containers) - Optimize scheduling`;
               optimizationScore = 45;
               optimizationType = 'route-optimization';
             }
           }
-          
+
           // TYPE BALANCE: Container type imbalance (lowest priority)
           if (!optimization) {
             const typeTotal = analysisData.containerTypes.get(typeSize) || 0;
-            const allTypes = Array.from(analysisData.containerTypes.values()).reduce((a, b) => a + b, 0);
+            const allTypes = (Array.from(analysisData.containerTypes.values()) as number[]).reduce((a, b) => a + b, 0);
             if (typeTotal > allTypes * 0.5) {
               optimization = `${typeSize} type dominance (${Math.round((typeTotal/allTypes) * 100)}% of fleet) - Monitor balance`;
               optimizationScore = 30;
@@ -601,14 +611,64 @@ export async function POST(req: NextRequest) {
         .filter((record: any) => record !== null); // Remove null records (unclear destinations)
       
       console.log(`Generated booking records with optimization analysis: ${bookingData.length}`);
-      console.log('Depot utilization:', Array.from(analysisData.depotUtilization.entries()).map(([depot, stats]) => 
+      console.log('Depot utilization:', (Array.from(analysisData.depotUtilization.entries()) as Array<[string, any]>).map(([depot, stats]) =>
         `${depot}: ${Math.round((stats.empty/stats.total)*100)}% empty`
       ));
-      console.log('Top routes:', Array.from(analysisData.routes.entries())
+      console.log('Top routes:', (Array.from(analysisData.routes.entries()) as Array<[string, number]>)
         .sort(([,a], [,b]) => b - a)
         .slice(0, 5)
         .map(([route, count]) => `${route}: ${count} containers`)
       );
+
+      // Calculate empty container statistics
+      const totalContainerCount = bookingData.length;
+      const emptyContainerCount = bookingData.filter((b: any) =>
+        b.empty_laden && b.empty_laden.toLowerCase().includes('empty')
+      ).length;
+      const ladenContainerCount = bookingData.filter((b: any) =>
+        b.empty_laden && b.empty_laden.toLowerCase().includes('laden')
+      ).length;
+      const emptyPercentage = totalContainerCount > 0
+        ? Math.round((emptyContainerCount / totalContainerCount) * 100)
+        : 0;
+
+      // Store statistics for response
+      analysisData.containerStats = {
+        total: totalContainerCount,
+        empty: emptyContainerCount,
+        laden: ladenContainerCount,
+        emptyPercentage,
+        warnings: []
+      };
+
+      // Generate warnings based on empty container ratio
+      if (emptyContainerCount === 0) {
+        analysisData.containerStats.warnings.push({
+          severity: 'high',
+          message: 'No empty containers detected in uploaded data',
+          impact: 'Empty container relocation optimization will not be available. System will only analyze laden container routing and dispatch efficiency.'
+        });
+      } else if (emptyPercentage < 10) {
+        analysisData.containerStats.warnings.push({
+          severity: 'medium',
+          message: `Very low empty container ratio (${emptyPercentage}%)`,
+          impact: `Only ${emptyContainerCount} out of ${totalContainerCount} containers are empty. Limited empty container relocation recommendations will be generated.`
+        });
+      } else if (emptyPercentage < 20) {
+        analysisData.containerStats.warnings.push({
+          severity: 'low',
+          message: `Low empty container ratio (${emptyPercentage}%)`,
+          impact: `${emptyContainerCount} empty containers detected. Some empty relocation optimization available.`
+        });
+      }
+
+      console.log('Container Statistics:', {
+        total: totalContainerCount,
+        empty: emptyContainerCount,
+        laden: ladenContainerCount,
+        emptyPercentage: `${emptyPercentage}%`,
+        warnings: analysisData.containerStats.warnings.length
+      });
     }
     
     if (bookingData) {
@@ -707,7 +767,8 @@ export async function POST(req: NextRequest) {
     const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`✅ Processing completed in ${processingTime}s`);
 
-    return NextResponse.json({
+    // Build response with container statistics if available
+    const responseData: any = {
       success: true,
       message: `Excel file processed successfully in ${processingTime}s - AI suggestions generated!`,
       sheets: Object.keys(results),
@@ -718,7 +779,28 @@ export async function POST(req: NextRequest) {
         acc[key] = Array.isArray(value) ? value.slice(0, 3) : value;
         return acc;
       }, {} as any)
-    });
+    };
+
+    // Add container statistics and warnings if GridViewExport was processed
+    if (results.gridviewexport && analysisData?.containerStats) {
+      responseData.containerAnalysis = {
+        total: analysisData.containerStats.total,
+        empty: analysisData.containerStats.empty,
+        laden: analysisData.containerStats.laden,
+        emptyPercentage: `${analysisData.containerStats.emptyPercentage}%`,
+        warnings: analysisData.containerStats.warnings
+      };
+
+      // Add warning to main message if no empty containers
+      if (analysisData.containerStats.warnings.length > 0) {
+        const highSeverityWarning = analysisData.containerStats.warnings.find((w: any) => w.severity === 'high');
+        if (highSeverityWarning) {
+          responseData.message = `Excel file processed successfully in ${processingTime}s - ⚠️ WARNING: ${highSeverityWarning.message}`;
+        }
+      }
+    }
+
+    return NextResponse.json(responseData);
 
   } catch (error) {
     console.error('Excel upload error:', error);

@@ -1,5 +1,7 @@
 import { LSTMDataPreprocessor, TimeSeriesData, ProcessedTimeSeriesData } from './lstmPreprocessor';
 import { LSTMEmptyContainerModel, LSTMModelConfig, TrainingProgress, PredictionResult } from './lstmModel';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface TrainingConfig {
   modelConfig: Partial<LSTMModelConfig>;
@@ -272,15 +274,16 @@ export class LSTMTrainingPipeline {
    */
   async saveModel(modelName?: string): Promise<void> {
     await this.model.saveModel(modelName);
-    
-    // Save training metadata
+
+    // Save training metadata to file system
     const metadata = {
       lastTrainingDate: this.lastTrainingDate,
       config: this.config
     };
-    
-    localStorage.setItem(`${modelName || 'lstm-empty-container-model'}-metadata`, 
-      JSON.stringify(metadata));
+
+    const metadataPath = path.join(process.cwd(), 'models', 'lstm_empty_containers', 'metadata.json');
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+    console.log('✅ Training metadata saved');
   }
 
   /**
@@ -288,13 +291,15 @@ export class LSTMTrainingPipeline {
    */
   async loadModel(modelName?: string): Promise<void> {
     await this.model.loadModel(modelName);
-    
-    // Load training metadata
-    const metadataStr = localStorage.getItem(`${modelName || 'lstm-empty-container-model'}-metadata`);
-    if (metadataStr) {
+
+    // Load training metadata from file system
+    const metadataPath = path.join(process.cwd(), 'models', 'lstm_empty_containers', 'metadata.json');
+    if (fs.existsSync(metadataPath)) {
+      const metadataStr = fs.readFileSync(metadataPath, 'utf-8');
       const metadata = JSON.parse(metadataStr);
       this.lastTrainingDate = metadata.lastTrainingDate ? new Date(metadata.lastTrainingDate) : null;
       this.config = { ...this.config, ...metadata.config };
+      console.log('✅ Training metadata loaded');
     }
   }
 

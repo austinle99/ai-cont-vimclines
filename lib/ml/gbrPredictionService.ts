@@ -253,7 +253,7 @@ export class GBRPredictionService {
               const result = JSON.parse(jsonMatch[1]);
               resolve(result);
             } else {
-              reject(new Error('Failed to parse Python output'));
+              reject(new Error('Failed to parse Python output - no JSON markers found'));
             }
           } catch (parseError) {
             reject(new Error(`Failed to parse Python output: ${parseError}`));

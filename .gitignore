@@ -30,3 +30,12 @@ nul
 
 # Kubernetes secrets with real credentials
 k8s/*-secrets.yaml
+
+# Machine Learning Models
+models/lstm_empty_containers/*.bin
+models/lstm_empty_containers/model.json
+models/lstm_empty_containers/weights.bin
+models/lstm_empty_containers/scaling_params.json
+models/lstm_empty_containers/metadata.json
+models/*.pkl
+!models/README.md

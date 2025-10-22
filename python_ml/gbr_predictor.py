@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Gradient Boosting Regressor for Container Empty Count Prediction
 Optimized for short-term (1-3 days) predictions with high interpretability
@@ -11,6 +12,8 @@ Features:
 - JSON I/O for Node.js integration
 """
 
+import sys
+import io
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
@@ -416,7 +419,11 @@ class ContainerGBRPredictor:
         }
 
         joblib.dump(model_data, path, compress=3)
-        print(f"[OK] Model saved to {path}")
+        # Use ASCII-safe output to avoid Unicode encoding issues on Windows
+        try:
+            print(f"[OK] Model saved to {path}")
+        except UnicodeEncodeError:
+            print(f"[OK] Model saved successfully")
 
     def load(self, path='models/gbr_model.pkl'):
         """
@@ -460,7 +467,7 @@ def main():
 
     # Load input data
     print(f"[INFO] Loading input from {input_file}...")
-    with open(input_file, 'r') as f:
+    with open(input_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
     predictor = ContainerGBRPredictor(model_type='auto')
@@ -485,9 +492,11 @@ def main():
             'training_metadata': predictor.training_metadata
         }
 
-        print("\n" + "="*60)
-        print(json.dumps(result, indent=2))
-        print("="*60)
+        print("\n" + "="*60, flush=True)
+        print(json.dumps(result, indent=2), flush=True)
+        print("="*60, flush=True)
+        sys.stdout.flush()
+        sys.stderr.flush()
 
     elif command == 'predict':
         # Prediction mode
