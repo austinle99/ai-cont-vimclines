@@ -14,6 +14,14 @@
 .env.development.local
 .env.test.local
 .env.production.local
+.env.docker
+
+# Credentials and sensitive files
+credentials.*
+*.key
+*.pem
+secrets.yaml
+secrets.json
 
 # Database
 prisma/dev.db*
@@ -47,6 +55,9 @@ LSTM_SAVE_ISSUE_SUMMARY.md
 LSTM_STORAGE_FIX_SUMMARY.md
 docs/GBR_ENSEMBLE_GUIDE.md
 models/README.md
+
+# Claude Code configuration
+.claude/
 
 # Keep these documentation files
 !README.md
