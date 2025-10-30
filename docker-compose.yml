@@ -44,6 +44,29 @@ services:
         node server.js
       "
 
+  # Retrieval-Augmented Generation microservice
+  rag-service:
+    build:
+      context: .
+      dockerfile: python_optimization/Dockerfile
+    container_name: ai-cont-rag
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-ai_cont_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-meta-llama/Meta-Llama-3-8B-Instruct}
+      EMBED_MODEL_NAME: ${EMBED_MODEL_NAME:-sentence-transformers/all-MiniLM-L6-v2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    gpus: all
+    command: ["python3", "-m", "python_optimization"]
+
   # Optional: pgAdmin for database management
   pgadmin:
     image: dpage/pgadmin4:latest

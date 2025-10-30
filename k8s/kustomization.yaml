@@ -11,6 +11,8 @@ resources:
   - app-secrets.yaml
   - app-deployment.yaml
   - app-service.yaml
+  - rag-service-deployment.yaml
+  - rag-service-service.yaml
 
 namespace: ai-cont
 
