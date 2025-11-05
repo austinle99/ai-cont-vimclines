@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Card from "@/components/Card";
 import ProgressBar from "@/components/ProgressBar";
 import Sidebar from "@/components/Sidebar";
@@ -76,7 +76,21 @@ export default function Page() {
     fetchData();
   }, []);
 
-  const max = Math.max(100, ...inventory.map((i: InventoryItem) => i.stock || 0));
+  // Memoize expensive calculations
+  const max = useMemo(() =>
+    Math.max(100, ...inventory.map((i: InventoryItem) => i.stock || 0)),
+    [inventory]
+  );
+
+  const draftProposals = useMemo(() =>
+    proposals.filter((p: Proposal) => p.status === 'draft'),
+    [proposals]
+  );
+
+  const activeAlerts = useMemo(() =>
+    alerts.filter((a: Alert) => a.status === 'active'),
+    [alerts]
+  );
 
   if (loading) {
     return (
@@ -146,12 +160,12 @@ export default function Page() {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Smart Proposals */}
-              {proposals.filter(p => p.status === "draft").length > 0 && (
+              {draftProposals.length > 0 && (
                 <div className="bg-neutral-900/50 rounded-lg p-3">
                   <div className="text-sm font-medium text-green-400 mb-2">
-                    📋 Smart Proposals ({proposals.filter(p => p.status === "draft").length})
+                    📋 Smart Proposals ({draftProposals.length})
                   </div>
-                  {proposals.filter(p => p.status === "draft").slice(0, 3).map(p => (
+                  {draftProposals.slice(0, 3).map(p => (
                     <div key={p.id} className="text-xs text-neutral-300 mb-1">
                       • {p.route} - {p.qty} TEU {p.size} | {p.reason}
                     </div>
@@ -163,12 +177,12 @@ export default function Page() {
               )}
               
               {/* Critical Alerts */}
-              {alerts.filter(a => a.status === "active").length > 0 && (
+              {activeAlerts.length > 0 && (
                 <div className="bg-neutral-900/50 rounded-lg p-3">
                   <div className="text-sm font-medium text-orange-400 mb-2">
-                    ⚠️ Active Alerts ({alerts.filter(a => a.status === "active").length})
+                    ⚠️ Active Alerts ({activeAlerts.length})
                   </div>
-                  {alerts.filter(a => a.status === "active").slice(0, 3).map(alert => (
+                  {activeAlerts.slice(0, 3).map(alert => (
                     <div key={alert.id} className="text-xs text-neutral-300 mb-1">
                       • {alert.level} - {alert.message}
                     </div>

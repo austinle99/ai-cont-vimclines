@@ -1,8 +1,8 @@
 import { EnsemblePredictionService } from '@/lib/ml/ensemblePredictionService';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/db';
 import { NextRequest } from 'next/server';
 
-const prisma = new PrismaClient();
+const isDev = process.env.NODE_ENV === 'development';
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const port = url.searchParams.get('port');
     const containerType = url.searchParams.get('type');
 
-    console.log(`🔮 Prediction API called: ${days} days, port=${port || 'all'}, type=${containerType || 'all'}`);
+    if (isDev) console.log(`🔮 Prediction API called: ${days} days, port=${port || 'all'}, type=${containerType || 'all'}`);
 
     // Validate parameters
     if (days < 1 || days > 30) {
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' }
     });
 
-    console.log(`📊 Loaded ${bookings.length} historical bookings`);
+    if (isDev) console.log(`📊 Loaded ${bookings.length} historical bookings`);
 
     if (bookings.length === 0) {
       return Response.json({
@@ -47,10 +47,10 @@ export async function GET(req: NextRequest) {
     await ensemble.initialize();
 
     // Generate predictions
-    console.log(`🤖 Generating predictions...`);
+    if (isDev) console.log(`🤖 Generating predictions...`);
     const predictions = await ensemble.getPredictions(bookings, days);
 
-    console.log(`✅ Generated ${predictions.length} predictions`);
+    if (isDev) console.log(`✅ Generated ${predictions.length} predictions`);
 
     // Format response
     const formattedPredictions = predictions.map(p => ({
@@ -98,6 +98,10 @@ export async function GET(req: NextRequest) {
         },
         generatedAt: new Date().toISOString()
       }
+    }, {
+      headers: {
+        'Cache-Control': 'public, max-age=300, s-maxage=600', // Cache for 5 min client, 10 min CDN
+      }
     });
 
   } catch (error) {
@@ -107,7 +111,5 @@ export async function GET(req: NextRequest) {
       error: error instanceof Error ? error.message : 'Unknown error occurred',
       details: error instanceof Error ? error.stack : undefined
     }, { status: 500 });
-  } finally {
-    await prisma.$disconnect();
   }
 }

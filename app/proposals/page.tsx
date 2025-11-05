@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { approveProposal, rejectProposal } from "@/app/action";
 import Sidebar from "@/components/Sidebar";
 import Chatbot from "@/components/Chatbot";
@@ -49,10 +49,10 @@ export default function Page() {
           fetch('/api/proposals'),
           fetch('/api/bookings')
         ]);
-        
+
         const proposalsData = await proposalsResponse.json();
         const bookingsData = await bookingsResponse.json();
-        
+
         setProposals(proposalsData);
         setBookings(bookingsData);
       } catch (error) {
@@ -65,6 +65,52 @@ export default function Page() {
     };
 
     fetchData();
+  }, []);
+
+  // Memoized filtered bookings - only recompute when searchTerm or bookings change
+  const filteredBookings = useMemo(() => {
+    if (!searchTerm) return bookings;
+
+    const lowerSearchTerm = searchTerm.toLowerCase();
+    return bookings.filter((b: Booking) => {
+      const containerNo = b.containerNo || '';
+      return containerNo.toLowerCase().includes(lowerSearchTerm) ||
+             b.origin.toLowerCase().includes(lowerSearchTerm) ||
+             b.destination.toLowerCase().includes(lowerSearchTerm) ||
+             b.depot?.toLowerCase().includes(lowerSearchTerm);
+    });
+  }, [bookings, searchTerm]);
+
+  // Memoized helper functions
+  const getScoreColor = useCallback((score: number) => {
+    if (score >= 80) return "text-red-400 font-bold";
+    if (score >= 60) return "text-yellow-400 font-semibold";
+    if (score >= 40) return "text-blue-400";
+    return "text-green-400";
+  }, []);
+
+  const getTypeIcon = useCallback((type: string) => {
+    switch (type) {
+      case 'urgent-relocation': return '🆘';
+      case 'high-priority': return '🚨';
+      case 'medium-priority': return '⚠️';
+      case 'routing-efficiency': return '🔄';
+      case 'dispatch-delay': return '⏰';
+      case 'route-optimization': return '🛣️';
+      case 'type-balance': return '⚖️';
+      default: return '✅';
+    }
+  }, []);
+
+  // Memoized handlers
+  const handleApprove = useCallback(async (proposalId: string) => {
+    setProposals(prev => prev.filter(item => item.id !== proposalId));
+    await approveProposal(proposalId);
+  }, []);
+
+  const handleReject = useCallback(async (proposalId: string) => {
+    setProposals(prev => prev.filter(item => item.id !== proposalId));
+    await rejectProposal(proposalId);
   }, []);
 
   if (loading) {
@@ -96,23 +142,15 @@ export default function Page() {
                 <div className="text-neutral-400">{p.qty} TEU • {p.reason || "—"} • ({p.status})</div>
               </div>
               <div className="flex gap-2">
-                <button 
-                  onClick={async () => {
-                    // Optimistically remove the proposal from the UI
-                    setProposals(proposals.filter(item => item.id !== p.id));
-                    await approveProposal(p.id); // Action can complete in the background
-                  }}
+                <button
+                  onClick={() => handleApprove(p.id)}
                   className="px-3 py-1 rounded bg-green-600 hover:bg-green-500"
                   type="button"
                 >
                   Yes
                 </button>
-                <button 
-                  onClick={async () => {
-                    // Optimistically remove the proposal from the UI
-                    setProposals(proposals.filter(item => item.id !== p.id));
-                    await rejectProposal(p.id); // Action can complete in the background
-                  }}
+                <button
+                  onClick={() => handleReject(p.id)}
                   className="px-3 py-1 rounded bg-red-600 hover:bg-red-500"
                   type="button"
                 >
@@ -147,13 +185,7 @@ export default function Page() {
               </div>
               {searchTerm && !isDashboardCollapsed && (
                 <div className="text-xs text-blue-400">
-                  {bookings.filter((b: Booking) => {
-                    const containerNo = b.containerNo || '';
-                    return containerNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           b.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           b.destination.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           b.depot?.toLowerCase().includes(searchTerm.toLowerCase());
-                  }).length} results found
+                  {filteredBookings.length} results found
                 </div>
               )}
             </div>
@@ -198,37 +230,8 @@ export default function Page() {
                   </tr>
                 </thead>
                 <tbody>
-                  {bookings
-                    .filter((b: Booking) => {
-                      if (!searchTerm) return true;
-                      const containerNo = b.containerNo || '';
-                      return containerNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             b.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             b.destination.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             b.depot?.toLowerCase().includes(searchTerm.toLowerCase());
-                    })
-                    .map((b: Booking) => {
+                  {filteredBookings.map((b: Booking) => {
                     const score = b.optimizationScore || 0;
-                    const getScoreColor = (score: number) => {
-                      if (score >= 80) return "text-red-400 font-bold";
-                      if (score >= 60) return "text-yellow-400 font-semibold";
-                      if (score >= 40) return "text-blue-400";
-                      return "text-green-400";
-                    };
-                    
-                    const getTypeIcon = (type: string) => {
-                      switch (type) {
-                        case 'urgent-relocation': return '🆘';
-                        case 'high-priority': return '🚨';
-                        case 'medium-priority': return '⚠️';
-                        case 'routing-efficiency': return '🔄';
-                        case 'dispatch-delay': return '⏰';
-                        case 'route-optimization': return '🛣️';
-                        case 'type-balance': return '⚖️';
-                        default: return '✅';
-                      }
-                    };
-                    
                     const isEmpty = b.emptyLaden?.toLowerCase().includes('empty');
                     
                     return (
@@ -264,13 +267,7 @@ export default function Page() {
                 </tbody>
               </table>
               
-              {searchTerm && bookings.filter((b: Booking) => {
-                const containerNo = b.containerNo || '';
-                return containerNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       b.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       b.destination.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       b.depot?.toLowerCase().includes(searchTerm.toLowerCase());
-              }).length === 0 && (
+              {searchTerm && filteredBookings.length === 0 && (
                 <div className="text-center py-8 text-neutral-400">
                   <div className="text-2xl mb-2">🔍</div>
                   <div>No containers found matching "{searchTerm}"</div>

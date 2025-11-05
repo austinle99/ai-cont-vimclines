@@ -118,17 +118,18 @@ export class LSTMEmptyContainerModel {
     // Store scaling parameters for later denormalization
     this.scalingParams = processedData.scalingParams;
 
-    // Convert data to tensors
-    const xTrain = tf.tensor3d(processedData.features as unknown as number[][][]);
-    const yTrain = tf.tensor2d(processedData.targets, [processedData.targets.length, 1]);
-
     console.log('Training LSTM model...');
     console.log(`Training samples: ${processedData.features.length}`);
     console.log(`Sequence length: ${this.config.sequenceLength}`);
     console.log(`Feature count: ${this.config.featureCount}`);
 
-    try {
-      const history = await this.model.fit(xTrain, yTrain, {
+    // Use tf.tidy to automatically clean up tensors
+    return await tf.tidy(() => {
+      // Convert data to tensors
+      const xTrain = tf.tensor3d(processedData.features as unknown as number[][][]);
+      const yTrain = tf.tensor2d(processedData.targets, [processedData.targets.length, 1]);
+
+      return this.model!.fit(xTrain, yTrain, {
         epochs: this.config.epochs,
         batchSize: this.config.batchSize,
         validationSplit: this.config.validationSplit,
@@ -150,23 +151,13 @@ export class LSTMEmptyContainerModel {
             if ((epoch + 1) % 10 === 0) {
               console.log(`Epoch ${epoch + 1}/${this.config.epochs} - Loss: ${logs?.loss?.toFixed(4)} - Val Loss: ${logs?.val_loss?.toFixed(4)}`);
             }
+          },
+          onTrainEnd: async () => {
+            console.log('✅ LSTM training completed');
           }
         }
       });
-
-      console.log('✅ LSTM training completed');
-      
-      // Clean up tensors
-      xTrain.dispose();
-      yTrain.dispose();
-
-      return history;
-    } catch (error) {
-      // Clean up tensors on error
-      xTrain.dispose();
-      yTrain.dispose();
-      throw error;
-    }
+    });
   }
 
   /**
@@ -187,64 +178,54 @@ export class LSTMEmptyContainerModel {
     const predictions: number[] = [];
     const confidence: number[] = [];
 
-    // Create tensor from input
-    const inputTensor = tf.tensor3d(inputSequences);
+    // Use tf.tidy for automatic memory management during predictions
+    for (let i = 0; i < futureDays; i++) {
+      const { prediction: lastPrediction, confidenceScore } = await tf.tidy(() => {
+        // Create or update input tensor
+        const inputTensor = i === 0
+          ? tf.tensor3d(inputSequences)
+          : tf.tensor3d(inputSequences); // Will be updated below
 
-    try {
-      // Make initial prediction
-      let currentInput = inputTensor;
-      
-      for (let i = 0; i < futureDays; i++) {
-        const prediction = this.model.predict(currentInput) as tf.Tensor;
-        const predictionArray = await prediction.data();
-        
-        // Get the last prediction
-        const lastPrediction = predictionArray[predictionArray.length - 1];
-        predictions.push(lastPrediction);
-        
-        // Calculate confidence based on model's consistency
-        // (This is a simplified confidence metric)
-        const confidenceScore = this.calculateConfidence(new Float32Array(predictionArray as ArrayLike<number>));
-        confidence.push(confidenceScore);
+        const prediction = this.model!.predict(inputTensor) as tf.Tensor;
+        return prediction;
+      }).then(async (predictionTensor) => {
+        const predictionArray = await predictionTensor.data();
+        const lastPred = predictionArray[predictionArray.length - 1];
+        const conf = this.calculateConfidence(new Float32Array(predictionArray as ArrayLike<number>));
 
-        // Update input for next prediction (rolling window)
-        if (i < futureDays - 1) {
-          // Create new sequence by shifting and adding prediction
-          const currentData = await currentInput.array() as number[][][];
-          const newSequence = currentData.map(seq => {
-            const newSeq = seq.slice(1); // Remove first timestep
-            // Add prediction as new timestep (with all features)
-            const newTimestep = [lastPrediction, 0, 0, 0, 0, 0, 0]; // Only empty container count is predicted
-            newSeq.push(newTimestep);
-            return newSeq;
-          });
-          
-          currentInput.dispose();
-          currentInput = tf.tensor3d(newSequence);
-        }
+        // Dispose of prediction tensor after extracting data
+        predictionTensor.dispose();
 
-        prediction.dispose();
+        return { prediction: lastPred, confidenceScore: conf };
+      });
+
+      predictions.push(lastPrediction);
+      confidence.push(confidenceScore);
+
+      // Update input sequence for next prediction (rolling window)
+      if (i < futureDays - 1) {
+        inputSequences = inputSequences.map(seq => {
+          const newSeq = seq.slice(1); // Remove first timestep
+          // Add prediction as new timestep (with all features)
+          const newTimestep = [lastPrediction, 0, 0, 0, 0, 0, 0]; // Only empty container count is predicted
+          newSeq.push(newTimestep);
+          return newSeq;
+        });
       }
-
-      currentInput.dispose();
-
-      // Denormalize predictions
-      const denormalizedPredictions = this.denormalizePredictions(predictions);
-
-      // Generate future timestamps
-      const timestamps = this.generateFutureTimestamps(futureDays);
-
-      return {
-        predictions,
-        confidence,
-        timestamps,
-        denormalizedPredictions
-      };
-
-    } catch (error) {
-      inputTensor.dispose();
-      throw error;
     }
+
+    // Denormalize predictions
+    const denormalizedPredictions = this.denormalizePredictions(predictions);
+
+    // Generate future timestamps
+    const timestamps = this.generateFutureTimestamps(futureDays);
+
+    return {
+      predictions,
+      confidence,
+      timestamps,
+      denormalizedPredictions
+    };
   }
 
   /**
@@ -258,19 +239,20 @@ export class LSTMEmptyContainerModel {
       throw new Error('Model not trained yet');
     }
 
-    const xTest = tf.tensor3d(testFeatures);
-    const yTest = tf.tensor2d(testTargets, [testTargets.length, 1]);
+    // Use tf.tidy for automatic cleanup
+    return await tf.tidy(async () => {
+      const xTest = tf.tensor3d(testFeatures);
+      const yTest = tf.tensor2d(testTargets, [testTargets.length, 1]);
 
-    try {
-      const evaluation = this.model.evaluate(xTest, yTest) as tf.Scalar[];
+      const evaluation = this.model!.evaluate(xTest, yTest) as tf.Scalar[];
       const loss = await evaluation[0].data();
       const mae = await evaluation[1].data();
 
       // Calculate MAPE (Mean Absolute Percentage Error)
-      const predictions = this.model.predict(xTest) as tf.Tensor2D;
+      const predictions = this.model!.predict(xTest) as tf.Tensor2D;
       const predData = await predictions.data();
       const testData = await yTest.data();
-      
+
       let mapeSum = 0;
       for (let i = 0; i < testData.length; i++) {
         if (testData[i] !== 0) {
@@ -279,23 +261,12 @@ export class LSTMEmptyContainerModel {
       }
       const mape = (mapeSum / testData.length) * 100;
 
-      // Clean up
-      xTest.dispose();
-      yTest.dispose();
-      predictions.dispose();
-      evaluation.forEach(tensor => tensor.dispose());
-
       return {
         loss: loss[0],
         mae: mae[0],
         mape
       };
-
-    } catch (error) {
-      xTest.dispose();
-      yTest.dispose();
-      throw error;
-    }
+    });
   }
 
   /**

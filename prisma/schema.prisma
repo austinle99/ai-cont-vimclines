@@ -45,6 +45,9 @@ model Booking {
   @@index([origin, destination, size])
   @@index([optimizationScore])
   @@index([optimizationType])
+  @@index([date])
+  @@index([emptyLaden])
+  @@index([status])
 }
 
 model Proposal {
@@ -57,6 +60,9 @@ model Proposal {
   reason    String?
   status    String
   createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Alert {
@@ -69,6 +75,10 @@ model Alert {
   status      String    @default("active")
   createdAt   DateTime  @default(now())
   resolvedAt  DateTime?
+
+  @@index([status])
+  @@index([level])
+  @@index([createdAt])
 }
 
 model Comment {
