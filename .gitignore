@@ -11,11 +11,7 @@
 # Environment variables
 .env
 .env.*
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-.env.docker
+!.env.example
 
 # Credentials and sensitive files
 credentials.*
@@ -41,21 +37,18 @@ nul
 k8s/*-secrets.yaml
 
 # Machine Learning Models
-models/lstm_empty_containers/*.bin
-models/lstm_empty_containers/model.json
-models/lstm_empty_containers/weights.bin
-models/lstm_empty_containers/scaling_params.json
-models/lstm_empty_containers/metadata.json
-models/*.pkl
+models/**/*.bin
+models/**/*.pkl
+models/**/model.json
+models/**/weights.bin
+models/**/scaling_params.json
+models/**/metadata.json
 
 # Documentation files (auto-generated summaries and internal docs)
 CLAUDE.md
-NEXT_STEPS_ROADMAP.md
-GBR_TRAINING_SUMMARY.md
-LSTM_SAVE_ISSUE_SUMMARY.md
-LSTM_STORAGE_FIX_SUMMARY.md
-INSTALLATION_SUMMARY.md
-docs/GBR_ENSEMBLE_GUIDE.md
+*_SUMMARY.md
+*_ROADMAP.md
+docs/*_GUIDE.md
 models/README.md
 
 # Claude Code configuration
