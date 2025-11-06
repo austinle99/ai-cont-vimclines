@@ -1,4 +1,4 @@
-import { EnsemblePredictionService } from '@/lib/ml/ensemblePredictionService';
+import EnsembleServiceSingleton from '@/lib/ml/ensembleServiceSingleton';
 import { prisma } from '@/lib/db';
 import { NextRequest } from 'next/server';
 
@@ -42,13 +42,9 @@ export async function GET(req: NextRequest) {
       }, { status: 404 });
     }
 
-    // Initialize ensemble service
-    const ensemble = new EnsemblePredictionService();
-    await ensemble.initialize();
-
-    // Generate predictions
-    if (isDev) console.log(`🤖 Generating predictions...`);
-    const predictions = await ensemble.getPredictions(bookings, days);
+    // Generate predictions using singleton (no initialization needed - cached)
+    if (isDev) console.log(`🤖 Generating predictions using singleton...`);
+    const predictions = await EnsembleServiceSingleton.getPredictions(bookings, days);
 
     if (isDev) console.log(`✅ Generated ${predictions.length} predictions`);
 

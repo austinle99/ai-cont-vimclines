@@ -10,11 +10,15 @@ export async function GET() {
     // Dynamic import to avoid build-time issues
     const { prisma } = await import('@/lib/db');
     
-    const proposals = await prisma.proposal.findMany({ 
-      orderBy: [{ createdAt: "desc" }] 
+    const proposals = await prisma.proposal.findMany({
+      orderBy: [{ createdAt: "desc" }]
     });
-    
-    return NextResponse.json(proposals);
+
+    return NextResponse.json(proposals, {
+      headers: {
+        'Cache-Control': 'public, max-age=120, s-maxage=300', // 2 min client, 5 min CDN (shorter for proposals)
+      }
+    });
   } catch (error) {
     console.error('Error fetching proposals:', error);
     return NextResponse.json([], { status: 200 }); // Return empty array if DB not available

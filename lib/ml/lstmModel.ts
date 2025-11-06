@@ -123,13 +123,12 @@ export class LSTMEmptyContainerModel {
     console.log(`Sequence length: ${this.config.sequenceLength}`);
     console.log(`Feature count: ${this.config.featureCount}`);
 
-    // Use tf.tidy to automatically clean up tensors
-    return await tf.tidy(() => {
-      // Convert data to tensors
-      const xTrain = tf.tensor3d(processedData.features as unknown as number[][][]);
-      const yTrain = tf.tensor2d(processedData.targets, [processedData.targets.length, 1]);
+    // Convert data to tensors (manual disposal for async operations)
+    const xTrain = tf.tensor3d(processedData.features as unknown as number[][][]);
+    const yTrain = tf.tensor2d(processedData.targets, [processedData.targets.length, 1]);
 
-      return this.model!.fit(xTrain, yTrain, {
+    try {
+      return await this.model!.fit(xTrain, yTrain, {
         epochs: this.config.epochs,
         batchSize: this.config.batchSize,
         validationSplit: this.config.validationSplit,
@@ -157,7 +156,11 @@ export class LSTMEmptyContainerModel {
           }
         }
       });
-    });
+    } finally {
+      // Clean up tensors after training completes
+      xTrain.dispose();
+      yTrain.dispose();
+    }
   }
 
   /**
@@ -178,39 +181,40 @@ export class LSTMEmptyContainerModel {
     const predictions: number[] = [];
     const confidence: number[] = [];
 
-    // Use tf.tidy for automatic memory management during predictions
+    // Manual tensor management for async operations
     for (let i = 0; i < futureDays; i++) {
-      const { prediction: lastPrediction, confidenceScore } = await tf.tidy(() => {
-        // Create or update input tensor
-        const inputTensor = i === 0
-          ? tf.tensor3d(inputSequences)
-          : tf.tensor3d(inputSequences); // Will be updated below
+      // Create input tensor
+      const inputTensor = tf.tensor3d(inputSequences);
 
-        const prediction = this.model!.predict(inputTensor) as tf.Tensor;
-        return prediction;
-      }).then(async (predictionTensor) => {
+      let predictionTensor: tf.Tensor | null = null;
+      try {
+        // Make prediction
+        predictionTensor = this.model!.predict(inputTensor) as tf.Tensor;
+
+        // Extract data
         const predictionArray = await predictionTensor.data();
         const lastPred = predictionArray[predictionArray.length - 1];
         const conf = this.calculateConfidence(new Float32Array(predictionArray as ArrayLike<number>));
 
-        // Dispose of prediction tensor after extracting data
-        predictionTensor.dispose();
+        predictions.push(lastPred);
+        confidence.push(conf);
 
-        return { prediction: lastPred, confidenceScore: conf };
-      });
-
-      predictions.push(lastPrediction);
-      confidence.push(confidenceScore);
-
-      // Update input sequence for next prediction (rolling window)
-      if (i < futureDays - 1) {
-        inputSequences = inputSequences.map(seq => {
-          const newSeq = seq.slice(1); // Remove first timestep
-          // Add prediction as new timestep (with all features)
-          const newTimestep = [lastPrediction, 0, 0, 0, 0, 0, 0]; // Only empty container count is predicted
-          newSeq.push(newTimestep);
-          return newSeq;
-        });
+        // Update input sequence for next prediction (rolling window)
+        if (i < futureDays - 1) {
+          inputSequences = inputSequences.map(seq => {
+            const newSeq = seq.slice(1); // Remove first timestep
+            // Add prediction as new timestep (with all features)
+            const newTimestep = [lastPred, 0, 0, 0, 0, 0, 0]; // Only empty container count is predicted
+            newSeq.push(newTimestep);
+            return newSeq;
+          });
+        }
+      } finally {
+        // Always clean up tensors
+        inputTensor.dispose();
+        if (predictionTensor) {
+          predictionTensor.dispose();
+        }
       }
     }
 

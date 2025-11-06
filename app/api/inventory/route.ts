@@ -10,11 +10,15 @@ export async function GET() {
     // Dynamic import to avoid build-time issues
     const { prisma } = await import('@/lib/db');
     
-    const inventory = await prisma.inventory.findMany({ 
-      orderBy: [{ port: "asc" }, { type: "asc" }] 
+    const inventory = await prisma.inventory.findMany({
+      orderBy: [{ port: "asc" }, { type: "asc" }]
     });
-    
-    return NextResponse.json(inventory);
+
+    return NextResponse.json(inventory, {
+      headers: {
+        'Cache-Control': 'public, max-age=300, s-maxage=600', // 5 min client, 10 min CDN
+      }
+    });
   } catch (error) {
     console.error('Error fetching inventory:', error);
     return NextResponse.json([], { status: 200 }); // Return empty array if DB not available
