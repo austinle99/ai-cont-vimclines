@@ -6,10 +6,24 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // 5 minutes timeout for large files
 
+// Add a GET endpoint for testing route accessibility
+export async function GET() {
+  return NextResponse.json({
+    status: 'ok',
+    message: 'Upload Excel API is accessible',
+    endpoint: '/api/upload-excel',
+    method: 'POST',
+    maxFileSize: '50MB'
+  });
+}
+
 // This is a server-side API route for handling Excel file uploads.
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   console.log('🚀 Starting Excel upload processing...');
+  console.log('📍 Request URL:', req.url);
+  console.log('📍 Request method:', req.method);
+  console.log('📍 Content-Type:', req.headers.get('content-type'));
   
   try {
     const formData = await req.formData();
