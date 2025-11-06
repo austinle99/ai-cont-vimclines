@@ -19,6 +19,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
+    // Log detailed file information
+    console.log('📁 File received:');
+    console.log(`   Name: ${file.name}`);
+    console.log(`   Type: ${file.type}`);
+    console.log(`   Size: ${(file.size / 1024 / 1024).toFixed(2)} MB (${file.size} bytes)`);
+    console.log(`   Last Modified: ${new Date(file.lastModified).toISOString()}`);
+
     // Validate file type by name and MIME type
     const validExtensions = ['.xlsx', '.xls'];
 
@@ -31,9 +38,6 @@ export async function POST(req: NextRequest) {
         mimeType: file.type
       }, { status: 400 });
     }
-
-    console.log(`📁 Processing file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-    console.log(`   MIME type: ${file.type}`);
 
     // Check file size limit (50MB max)
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -50,11 +54,25 @@ export async function POST(req: NextRequest) {
 
     try {
       // Convert File to Buffer properly to avoid parsing issues
+      console.log('🔄 Converting file to buffer...');
       const arrayBuffer = await file.arrayBuffer();
+      console.log(`   ArrayBuffer size: ${arrayBuffer.byteLength} bytes`);
+
       const uint8Array = new Uint8Array(arrayBuffer);
+      console.log(`   Uint8Array length: ${uint8Array.length}`);
+      console.log(`   First 4 bytes (hex):`, Array.from(uint8Array.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+
       const buffer = Buffer.from(uint8Array);
       const bufferSizeMB = buffer.byteLength / 1024 / 1024;
-      console.log(`Buffer size: ${bufferSizeMB.toFixed(2)} MB`);
+      console.log(`   Buffer size: ${bufferSizeMB.toFixed(2)} MB`);
+
+      // Verify this is a valid ZIP/Excel file (should start with PK)
+      const header = buffer.toString('utf-8', 0, 2);
+      console.log(`   File header: "${header}" (should be "PK" for xlsx)`);
+
+      if (header !== 'PK') {
+        throw new Error(`Invalid Excel file format. File header is "${header}" but expected "PK". The file may be corrupted or not a valid .xlsx file.`);
+      }
 
       // Add memory check for very large files
       if (bufferSizeMB > 45) {
@@ -62,7 +80,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Load with error handling for corrupted or invalid files
-      // Use Buffer instead of ArrayBuffer for ExcelJS compatibility
+      console.log('📖 Parsing Excel with ExcelJS...');
       await workbook.xlsx.load(buffer as any);
       
       // Verify the workbook loaded successfully
