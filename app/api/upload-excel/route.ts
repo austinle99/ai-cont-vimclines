@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as ExcelJS from 'exceljs';
 
+// Configure route to handle large files and prevent caching
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 5 minutes timeout for large files
+
 // This is a server-side API route for handling Excel file uploads.
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -14,11 +19,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
-    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-      return NextResponse.json({ error: 'Only Excel files are allowed' }, { status: 400 });
+    // Validate file type by name and MIME type
+    const validExtensions = ['.xlsx', '.xls'];
+
+    const hasValidExtension = validExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+
+    if (!hasValidExtension) {
+      return NextResponse.json({
+        error: 'Only Excel files (.xlsx, .xls) are allowed',
+        details: `Received file: ${file.name}`,
+        mimeType: file.type
+      }, { status: 400 });
     }
 
     console.log(`📁 Processing file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`   MIME type: ${file.type}`);
 
     // Check file size limit (50MB max)
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -32,20 +47,23 @@ export async function POST(req: NextRequest) {
     // Parse Excel file with timeout protection and memory optimization
     const workbook = new ExcelJS.Workbook();
     console.log('📊 Loading Excel workbook...');
-    
+
     try {
-      // Use streaming for large files to reduce memory usage
-      const buffer = await file.arrayBuffer();
+      // Convert File to Buffer properly to avoid parsing issues
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const buffer = Buffer.from(uint8Array);
       const bufferSizeMB = buffer.byteLength / 1024 / 1024;
       console.log(`Buffer size: ${bufferSizeMB.toFixed(2)} MB`);
-      
+
       // Add memory check for very large files
       if (bufferSizeMB > 45) {
         console.warn(`⚠️ Large file detected: ${bufferSizeMB.toFixed(2)} MB - using optimized processing`);
       }
-      
+
       // Load with error handling for corrupted or invalid files
-      await workbook.xlsx.load(buffer);
+      // Use Buffer instead of ArrayBuffer for ExcelJS compatibility
+      await workbook.xlsx.load(buffer as any);
       
       // Verify the workbook loaded successfully
       if (!workbook.worksheets || workbook.worksheets.length === 0) {
