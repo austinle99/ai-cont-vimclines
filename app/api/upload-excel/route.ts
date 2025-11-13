@@ -285,20 +285,24 @@ export async function POST(req: NextRequest) {
       results.gridviewexport.forEach((row: any) => {
         // Enhanced depot mapping - use actual depot codes, terminal codes, or descriptive fallback
         const port = row['depot code'] || row['terminal code'] || row.depot || row['DEPOT'] ||
-                    row.terminal || row.port || row.location || 'Not Specified';
-        const type = row['type size'] || row.type || '20GP';
-        const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || '';
+                    row.terminal || row.port || row.location || row.movementlocation || 'Not Specified';
+        const type = row['type size'] || row.typesize || row.type || '20GP';
+        const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || row.isempty_desc || '';
+        const isEmptyNumeric = row.isempty !== undefined ? parseInt(row.isempty) : null;
         const key = `${port}_${type}`;
-        
+
         if (!containerGroups[key]) {
           containerGroups[key] = { port, type, count: 0, emptyCount: 0, ladenCount: 0 };
         }
         containerGroups[key].count++;
-        
-        // Count empty vs laden containers
-        if (emptyLaden && emptyLaden.toLowerCase().includes('empty')) {
+
+        // Count empty vs laden containers - use numeric isempty field if available
+        const isEmpty = isEmptyNumeric === 1 || (emptyLaden && emptyLaden.toLowerCase().includes('empty'));
+        const isLaden = isEmptyNumeric === 0 || (emptyLaden && emptyLaden.toLowerCase().includes('laden'));
+
+        if (isEmpty) {
           containerGroups[key].emptyCount++;
-        } else if (emptyLaden && emptyLaden.toLowerCase().includes('laden')) {
+        } else if (isLaden) {
           containerGroups[key].ladenCount++;
         }
       });
@@ -400,32 +404,37 @@ export async function POST(req: NextRequest) {
         }
         
         batch.forEach((row: any) => {
-        const containerNo = row['container no.'] || row['CONTAINER NO.'] || '';
-        const typeSize = row['type size'] || row['TYPE SIZE'] || '20GP';
-        const movement = row.movement || row['MOVEMENT'] || '';
+        const containerNo = row['container no.'] || row['CONTAINER NO.'] || row.containerno || '';
+        const typeSize = row['type size'] || row['TYPE SIZE'] || row.typesize || '20GP';
+        const movement = row.movement || row['MOVEMENT'] || row.movementcode || '';
         // Enhanced depot mapping - prioritize depot code, then terminal code, then fallback
         const depot = row['depot code'] || row['terminal code'] || row.depot || row['DEPOT'] ||
-                     row.terminal || row.location || 'Not Specified';
-        const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || '';
+                     row.terminal || row.location || row.movementlocation || row.terminalcode || 'Not Specified';
+        const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || row['EMPTY/LADEN'] || row.isempty_desc || '';
+        const isEmptyNumeric = row.isempty !== undefined ? parseInt(row.isempty) : null;
         // Enhanced POL/POD mapping (consistent with booking generation)
-        const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] || 
+        const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] ||
                     row['discharge port'] || row['loading port'] || row['pol port'] || depot;
-        const rawPodEarly = row.pod || row['POD'] || row['port of discharge'] || row['destination'] || row['to'] || 
+        const rawPodEarly = row.pod || row['POD'] || row['port of discharge'] || row['destination'] || row['to'] ||
                            row['discharge port'] || row['delivery port'] || row['pod port'] || row['final destination'] ||
                            row['dest'] || row['discharge'] || '';
         const pod = rawPodEarly || (movement.toLowerCase().includes('transfer') || movement.toLowerCase().includes('internal') ? pol : 'Unknown');
-        const systemDate = row['system date'] || row['SYSTEM DATE'] || new Date();
-        
+        const systemDate = row['system date'] || row['SYSTEM DATE'] || row.movementdate || new Date();
+
         if (!containerNo) return; // Skip rows without container number
-        
+
+        // Determine empty/laden status using numeric field if available
+        const isEmpty = isEmptyNumeric === 1 || (emptyLaden && emptyLaden.toLowerCase().includes('empty'));
+        const isLoaded = isEmptyNumeric === 0 || (emptyLaden && emptyLaden.toLowerCase().includes('laden'));
+
         // Build container movement history
         if (!containerHistory.has(containerNo)) {
           containerHistory.set(containerNo, []);
         }
         containerHistory.get(containerNo)!.push({
           typeSize, movement, depot, emptyLaden, pol, pod, systemDate,
-          isEmpty: emptyLaden && emptyLaden.toLowerCase().includes('empty'),
-          isLoaded: emptyLaden && emptyLaden.toLowerCase().includes('laden')
+          isEmpty,
+          isLoaded
         });
       });
       
@@ -500,9 +509,9 @@ export async function POST(req: NextRequest) {
       // Generate optimized booking data with suggestions (use limited data)
       bookingData = limitedData
         .filter((row: any) => {
-          const movement = row.movement || row['MOVEMENT'] || row['movement code'] || '';
+          const movement = row.movement || row['MOVEMENT'] || row['movement code'] || row.movementcode || row['MOVEMENTCODE'] || '';
           const movementLower = movement.toLowerCase();
-          
+
           // Include all meaningful container movement types based on actual data
           return movement && (
             movementLower.includes('discharge') ||
@@ -524,42 +533,46 @@ export async function POST(req: NextRequest) {
         })
         .map((row: any, index: number) => {
           const containerNo = row['container no.'] || row['CONTAINER NO.'] || row['container no'] || row['containerno'] || '';
-          const typeSize = row['type size'] || row['TYPE SIZE'] || row['type/size'] || row['container size'] || row['size'] || '20GP';
-          const movement = row.movement || row['MOVEMENT'] || row['movement code'] || row['move type'] || row['movetype'] || '';
-          
+          const typeSize = row['type size'] || row['TYPE SIZE'] || row['type/size'] || row['container size'] || row['size'] || row.typesize || '20GP';
+          const movement = row.movement || row['MOVEMENT'] || row['movement code'] || row.movementcode || row['MOVEMENTCODE'] || row['move type'] || row['movetype'] || '';
+
           // Enhanced depot/location mapping - prioritize actual codes over generic fallback
           const depot = row['depot code'] || row['terminal code'] || row.depot || row['DEPOT'] ||
-                       row.terminal || row.location || row['yard'] || 'Not Specified';
-          
-          const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] || 
-                            row['EMPTY/LADEN'] || row['empty laden'] || row['status'] || 
+                       row.terminal || row.location || row.movementlocation || row.terminalcode || row['yard'] || 'Not Specified';
+
+          const emptyLaden = row['empty / laden'] || row['EMPTY / LADEN'] || row['empty/laden'] ||
+                            row['EMPTY/LADEN'] || row['empty laden'] || row.isempty_desc || row['status'] ||
                             row['container status'] || '';
-          
+          const isEmptyNumeric = row.isempty !== undefined ? parseInt(row.isempty) : null;
+
           // Enhanced POL (Port of Loading) mapping - your data shows 'pol' column
-          const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] || 
+          const pol = row.pol || row['POL'] || row['port of loading'] || row['origin'] || row['from'] ||
                       row['loading port'] || row['pol port'] || depot;
-          
+
           // Enhanced POD (Port of Discharge) mapping - your data shows 'pod' column
-          const rawPod = row.pod || row['POD'] || row['pofd'] || row['port of discharge'] || row['destination'] || 
-                         row['to'] || row['discharge port'] || row['delivery port'] || row['pod port'] || 
+          const rawPod = row.pod || row['POD'] || row['pofd'] || row['port of discharge'] || row['destination'] ||
+                         row['to'] || row['discharge port'] || row['delivery port'] || row['pod port'] ||
                          row['final destination'] || row['dest'] || row['discharge'] || '';
-          
+
           // Better POD fallback logic - don't use 'Unknown', use actual data or skip
           const pod = rawPod || (movement.toLowerCase().includes('transfer') || movement.toLowerCase().includes('internal') ? pol : null);
-          
+
           // Debug logging for first few records to see what columns actually exist
           if (index < 5) {
             console.log(`Record ${index + 1} POD mapping:`, {
               raw_pod: row.pod,
-              raw_POD: row['POD'], 
+              raw_POD: row['POD'],
               destination: row.destination,
               to: row.to,
               final_pod: pod,
+              isempty: row.isempty,
+              isempty_numeric: isEmptyNumeric,
               all_keys: Object.keys(row).slice(0, 10) // Show first 10 column names
             });
           }
-          
-          const isEmpty = emptyLaden && emptyLaden.toLowerCase().includes('empty');
+
+          // Use numeric field to determine empty status
+          const isEmpty = isEmptyNumeric === 1 || (emptyLaden && emptyLaden.toLowerCase().includes('empty'));
           
           // Get unique container analysis for this specific container
           const containerAnalysis = analysisData.uniqueContainers.get(containerNo);
@@ -641,7 +654,7 @@ export async function POST(req: NextRequest) {
           }
           
           return {
-            date: row['system date'] || row['SYSTEM DATE'] || new Date(),
+            date: row['system date'] || row['SYSTEM DATE'] || row.movementdate || new Date(),
             origin: pol,
             destination: pod,
             size: typeSize,
@@ -652,6 +665,7 @@ export async function POST(req: NextRequest) {
             // Optimization data
             container_no: containerNo,
             empty_laden: emptyLaden,
+            isempty: row.isempty, // Pass numeric field for statistics
             depot: depot,
             optimization_suggestion: optimization,
             optimization_score: optimizationScore,
@@ -672,12 +686,14 @@ export async function POST(req: NextRequest) {
 
       // Calculate empty container statistics
       const totalContainerCount = bookingData.length;
-      const emptyContainerCount = bookingData.filter((b: any) =>
-        b.empty_laden && b.empty_laden.toLowerCase().includes('empty')
-      ).length;
-      const ladenContainerCount = bookingData.filter((b: any) =>
-        b.empty_laden && b.empty_laden.toLowerCase().includes('laden')
-      ).length;
+      const emptyContainerCount = bookingData.filter((b: any) => {
+        const isEmptyNumeric = b.isempty !== undefined ? parseInt(b.isempty) : null;
+        return isEmptyNumeric === 1 || (b.empty_laden && b.empty_laden.toLowerCase().includes('empty'));
+      }).length;
+      const ladenContainerCount = bookingData.filter((b: any) => {
+        const isEmptyNumeric = b.isempty !== undefined ? parseInt(b.isempty) : null;
+        return isEmptyNumeric === 0 || (b.empty_laden && b.empty_laden.toLowerCase().includes('laden'));
+      }).length;
       const emptyPercentage = totalContainerCount > 0
         ? Math.round((emptyContainerCount / totalContainerCount) * 100)
         : 0;
@@ -724,7 +740,59 @@ export async function POST(req: NextRequest) {
     if (bookingData) {
       const bookingRecords = [];
       
+      let detectionStats = { numeric: 0, text: 0, status: 0, unknown: 0 };
+
       for (const row of bookingData) {
+        // Normalize empty/laden status - handle both text and numeric formats
+        let normalizedEmptyLaden = null;
+        let detectionMethod = 'unknown';
+
+        // Priority 1: Check numeric field (isempty: 1 = empty, 0 = laden)
+        if (row.isempty !== undefined && row.isempty !== null) {
+          const isEmptyNumeric = parseInt(row.isempty);
+          if (isEmptyNumeric === 1) {
+            normalizedEmptyLaden = 'empty';
+            detectionMethod = 'numeric';
+          } else if (isEmptyNumeric === 0) {
+            normalizedEmptyLaden = 'laden';
+            detectionMethod = 'numeric';
+          }
+        }
+
+        // Priority 2: Check text field (empty_laden, isempty_desc, etc.)
+        if (!normalizedEmptyLaden && row.empty_laden) {
+          const lowerText = row.empty_laden.toString().toLowerCase().trim();
+          // Match various text patterns for empty containers
+          if (lowerText.includes('empty') || lowerText === 'e' || lowerText === 'emp' || lowerText === 'mt') {
+            normalizedEmptyLaden = 'empty';
+            detectionMethod = 'text';
+          }
+          // Match various text patterns for laden containers
+          else if (lowerText.includes('laden') || lowerText.includes('full') || lowerText.includes('load') ||
+                   lowerText === 'l' || lowerText === 'f' || lowerText === 'ld') {
+            normalizedEmptyLaden = 'laden';
+            detectionMethod = 'text';
+          }
+        }
+
+        // Priority 3: Check alternative text fields
+        if (!normalizedEmptyLaden) {
+          const statusField = row.status || row.container_status || '';
+          if (statusField) {
+            const lowerStatus = statusField.toString().toLowerCase().trim();
+            if (lowerStatus.includes('empty') || lowerStatus === 'e' || lowerStatus === 'mt') {
+              normalizedEmptyLaden = 'empty';
+              detectionMethod = 'status';
+            } else if (lowerStatus.includes('laden') || lowerStatus.includes('full') || lowerStatus.includes('load')) {
+              normalizedEmptyLaden = 'laden';
+              detectionMethod = 'status';
+            }
+          }
+        }
+
+        // Track detection method statistics
+        detectionStats[detectionMethod as keyof typeof detectionStats]++;
+
         const record = {
           date: new Date(row.date || row.ngày || Date.now()),
           origin: row.origin || row.xuất_phát || row.from || row.pol || row.depot || '',
@@ -735,7 +803,7 @@ export async function POST(req: NextRequest) {
           status: row.status || row.trạng_thái || row.movement || 'active',
           // Add optimization data
           containerNo: row.container_no || null,
-          emptyLaden: row.empty_laden || null,
+          emptyLaden: normalizedEmptyLaden,
           depot: row.depot || null,
           optimizationSuggestion: row.optimization_suggestion || null,
           optimizationScore: row.optimization_score || null,
@@ -748,6 +816,14 @@ export async function POST(req: NextRequest) {
         }
       }
       
+      // Log detection method statistics
+      console.log('Empty/Laden Detection Methods:', {
+        numeric: `${detectionStats.numeric} records (${Math.round(detectionStats.numeric/bookingRecords.length*100)}%)`,
+        text: `${detectionStats.text} records (${Math.round(detectionStats.text/bookingRecords.length*100)}%)`,
+        status: `${detectionStats.status} records (${Math.round(detectionStats.status/bookingRecords.length*100)}%)`,
+        unknown: `${detectionStats.unknown} records (${Math.round(detectionStats.unknown/bookingRecords.length*100)}%)`
+      });
+
       if (bookingRecords.length > 0) {
         // Clear existing booking data to prevent duplicates
         await prisma.booking.deleteMany();
