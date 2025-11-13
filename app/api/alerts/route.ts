@@ -12,10 +12,15 @@ export async function GET() {
     
     const alerts = await prisma.alert.findMany({
       where: { status: 'active' },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      take: 50 // Limit to 50 most recent alerts
     });
-    
-    return NextResponse.json(alerts);
+
+    return NextResponse.json(alerts, {
+      headers: {
+        'Cache-Control': 'public, max-age=120, s-maxage=300', // 2 min client, 5 min CDN
+      }
+    });
   } catch (error) {
     console.error('Error fetching alerts:', error);
     return NextResponse.json([], { status: 200 }); // Return empty array if DB not available

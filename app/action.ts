@@ -321,17 +321,21 @@ export async function recomputeProposals() {
   // Combine all proposals
   const allProposals = [...traditionalProposals, ...emptyContainerProposals];
 
-  await prisma.proposal.deleteMany({});
-  if (allProposals.length) {
-    await prisma.proposal.createMany({
-      data: allProposals.map(p => ({
-        id: p.id, route: p.route, size: p.size, qty: p.qty,
-        reason: p.reason, status: p.status,
-        estCost: p.estCost || null,
-        benefit: p.benefit || null
-      }))
-    });
-  }
+  // Use transaction to ensure atomicity (all-or-nothing)
+  // If createMany fails, deleteMany is rolled back - prevents data loss
+  await prisma.$transaction(async (tx) => {
+    await tx.proposal.deleteMany({});
+    if (allProposals.length) {
+      await tx.proposal.createMany({
+        data: allProposals.map(p => ({
+          id: p.id, route: p.route, size: p.size, qty: p.qty,
+          reason: p.reason, status: p.status,
+          estCost: p.estCost || null,
+          benefit: p.benefit || null
+        }))
+      });
+    }
+  });
 }
 
 export async function approveProposal(id: string) {
@@ -464,21 +468,42 @@ export async function clearAllDataAndSuggestions() {
 
 export async function generateAlerts() {
   const prisma = await getPrisma();
-  const inventory = await prisma.inventory.findMany();
-  const bookings = await prisma.booking.findMany();
-  const proposals = await prisma.proposal.findMany();
-  
+
+  // Optimize: Load only necessary data with limits
+  const [inventory, proposals] = await Promise.all([
+    prisma.inventory.findMany(),
+    prisma.proposal.findMany({
+      where: { status: 'draft' },
+      take: 100 // Limit to 100 most recent pending proposals
+    })
+  ]);
+
+  // Optimize: Use database aggregation instead of loading all bookings into memory
+  // Pre-calculate demand by port and container type using groupBy
+  const demandByPortAndType = await prisma.booking.groupBy({
+    by: ['destination', 'size'],
+    _sum: { qty: true },
+    where: {
+      destination: { in: inventory.map(i => i.port) },
+      size: { in: [...new Set(inventory.map(i => i.type))] }
+    }
+  });
+
+  // Create a lookup map for O(1) access
+  const demandMap = new Map(
+    demandByPortAndType.map(d => [`${d.destination}|${d.size}`, d._sum.qty || 0])
+  );
+
   // Clear existing active alerts to regenerate
   await prisma.alert.deleteMany({ where: { status: "active" } });
-  
+
   const alerts: any[] = [];
   let alertId = 1;
-  
+
   // Generate inventory-based alerts
   for (const inv of inventory) {
     const safety = getSafety(inv.port, inv.type);
-    const relatedBookings = bookings.filter(b => b.destination === inv.port && b.size === inv.type);
-    const demand = relatedBookings.reduce((sum, b) => sum + b.qty, 0);
+    const demand = demandMap.get(`${inv.port}|${inv.type}`) || 0;
     
     // Critical shortage alert
     if (inv.stock < safety) {
@@ -587,11 +612,21 @@ export async function ignoreAlert(formData: FormData) {
 // Enhanced Chat Assistant with Action Capabilities
 export async function askChat(q: string): Promise<{ message: string; action?: string; actionData?: any; mlSuggestions?: any[]; sessionId?: string }> {
   const prisma = await getPrisma();
+
+  // Optimized: Add limits to prevent loading entire database
   const [kpi, inv, props, alerts, bookings] = await Promise.all([
     prisma.kPI.findFirst(),
-    prisma.inventory.findMany(),
-    prisma.proposal.findMany(),
-    prisma.alert.findMany({ where: { status: "active" }, orderBy: { createdAt: "desc" } }),
+    prisma.inventory.findMany({ take: 50, orderBy: { port: 'asc' } }), // Limit to 50 inventory items
+    prisma.proposal.findMany({
+      take: 20,
+      where: { status: { in: ['draft', 'pending'] } }, // Only load actionable proposals
+      orderBy: { createdAt: 'desc' }
+    }),
+    prisma.alert.findMany({
+      where: { status: "active" },
+      orderBy: { createdAt: "desc" },
+      take: 10 // Limit to 10 most recent alerts
+    }),
     prisma.booking.findMany({ take: 10, orderBy: { date: "desc" } })
   ]);
 

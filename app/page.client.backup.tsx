@@ -1,6 +1,6 @@
-// Server Component version - Optimized for performance
-// This fetches data on the server, eliminating the client-side waterfall
+"use client";
 
+import { useState, useEffect, useMemo } from "react";
 import Card from "@/components/Card";
 import ProgressBar from "@/components/ProgressBar";
 import Sidebar from "@/components/Sidebar";
@@ -32,66 +32,88 @@ interface Alert {
   status: string;
 }
 
-// Server-side data fetching - happens before page renders
-async function getPageData() {
-  // Check if we're in build time (no DATABASE_URL available)
-  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('file:')) {
-    return {
-      inventory: [],
-      proposals: [],
-      alerts: []
-    };
-  }
-
-  try {
-    // Dynamic import to avoid build-time issues
-    const { prisma } = await import('@/lib/db');
-
-    // Fetch all data in parallel on the server
-    const [inventory, proposals, alerts] = await Promise.all([
-      prisma.inventory.findMany({
-        orderBy: { port: 'asc' }
-      }),
-      prisma.proposal.findMany({
-        take: 20,
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.alert.findMany({
-        where: { status: 'active' },
-        take: 50,
-        orderBy: { createdAt: 'desc' }
-      })
-    ]);
-
-    return {
-      inventory: inventory as InventoryItem[],
-      proposals: proposals as Proposal[],
-      alerts: alerts as Alert[]
-    };
-  } catch (error) {
-    console.error('Error fetching page data:', error);
-    // Return empty data if database is not available
-    return {
-      inventory: [],
-      proposals: [],
-      alerts: []
-    };
-  }
+interface SystemHealth {
+  ml_system: boolean;
+  lstm_system: boolean;
+  or_tools_system: boolean;
+  python_env: boolean;
+  last_check: Date;
 }
 
-// Server Component - async and fetches data before rendering
-export default async function Page() {
-  // Data is fetched on server before page renders - no loading state needed!
-  const { inventory, proposals, alerts } = await getPageData();
+export default function Page() {
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Calculate max for progress bars (server-side)
-  const max = Math.max(100, ...inventory.map(i => i.stock || 0));
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [inventoryResponse, proposalsResponse, alertsResponse] = await Promise.all([
+          fetch('/api/inventory'),
+          fetch('/api/proposals'),
+          fetch('/api/alerts')
+        ]);
+        
+        const inventoryData = await inventoryResponse.json();
+        const proposalsData = await proposalsResponse.json();
+        const alertsData = await alertsResponse.json();
+        
+        setInventory(inventoryData);
+        setProposals(proposalsData);
+        setAlerts(alertsData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setInventory([]);
+        setProposals([]);
+        setAlerts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Filter data (server-side)
-  const draftProposals = proposals.filter(p => p.status === 'draft');
-  const activeAlerts = alerts.filter(a => a.status === 'active');
+    fetchData();
+  }, []);
 
-  // Empty state
+  // Memoize expensive calculations
+  const max = useMemo(() =>
+    Math.max(100, ...inventory.map((i: InventoryItem) => i.stock || 0)),
+    [inventory]
+  );
+
+  const draftProposals = useMemo(() =>
+    proposals.filter((p: Proposal) => p.status === 'draft'),
+    [proposals]
+  );
+
+  const activeAlerts = useMemo(() =>
+    alerts.filter((a: Alert) => a.status === 'active'),
+    [alerts]
+  );
+
+  if (loading) {
+    return (
+      <div className="h-screen flex">
+        <Sidebar current="inventory" />
+        <main className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Tồn kho cont</h2>
+            <div className="text-sm text-neutral-400 space-x-3">
+              <Link className="underline" href="/proposals">Đề xuất</Link>
+              <Link className="underline" href="/reports">Báo cáo</Link>
+              <Link className="underline" href="/notifications">Noti</Link>
+            </div>
+          </div>
+          <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-6 text-center text-neutral-400">
+            <div>Loading inventory...</div>
+          </div>
+        </main>
+        <Chatbot />
+      </div>
+    );
+  }
+
   if (inventory.length === 0) {
     return (
       <div className="h-screen flex">
@@ -108,7 +130,7 @@ export default async function Page() {
           <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-6 text-center text-neutral-400">
             <div className="text-lg mb-2">📦</div>
             <div>No inventory data available</div>
-            <div className="text-sm">Please check database connection or upload data</div>
+            <div className="text-sm">Please check database connection</div>
           </div>
         </main>
         <Chatbot />
@@ -135,7 +157,7 @@ export default async function Page() {
             <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
               🤖 AI Generated Suggestions
             </h3>
-
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Smart Proposals */}
               {draftProposals.length > 0 && (
@@ -153,7 +175,7 @@ export default async function Page() {
                   </Link>
                 </div>
               )}
-
+              
               {/* Critical Alerts */}
               {activeAlerts.length > 0 && (
                 <div className="bg-neutral-900/50 rounded-lg p-3">
@@ -171,7 +193,7 @@ export default async function Page() {
                 </div>
               )}
             </div>
-
+            
             <div className="mt-3 text-xs text-neutral-400">
               💡 Use the chatbot (right side) for intelligent analysis and actions
             </div>
@@ -184,8 +206,8 @@ export default async function Page() {
             <div className="text-lg mb-2">🚀</div>
             <div className="text-lg font-medium mb-2">Welcome to AI Container Management</div>
             <div className="text-neutral-400 mb-4">Upload your Excel data to get started with AI suggestions</div>
-            <Link
-              href="/reports"
+            <Link 
+              href="/reports" 
               className="inline-block px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-medium"
             >
               📊 Upload Excel Data
@@ -209,6 +231,3 @@ export default async function Page() {
     </div>
   );
 }
-
-// Enable revalidation every 5 minutes
-export const revalidate = 300;

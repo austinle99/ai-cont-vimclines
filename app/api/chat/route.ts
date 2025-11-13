@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSafety } from '@/lib/safetyStock';
+import { redisCache, generateCacheKey } from '@/lib/cache/redisCache';
 
 export async function POST(req: NextRequest) {
   try {
     const { query } = await req.json();
-    
+
     // Check if we're in build time (no DATABASE_URL available)
     if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('file:')) {
       return NextResponse.json({
@@ -14,14 +15,36 @@ export async function POST(req: NextRequest) {
 
     // Dynamic import to avoid build-time issues
     const { prisma } = await import('@/lib/db');
-    
-    const [kpi, inv, props, alerts, bookings] = await Promise.all([
-      prisma.kPI.findFirst(),
-      prisma.inventory.findMany(),
-      prisma.proposal.findMany(),
-      prisma.alert.findMany({ where: { status: "active" }, orderBy: { createdAt: "desc" } }),
-      prisma.booking.findMany({ take: 10, orderBy: { date: "desc" } })
-    ]);
+
+    // Try to get cached data first (TTL: 60 seconds for chat context data)
+    const cacheKey = generateCacheKey('chat:context', {});
+    let contextData = await redisCache.get<any>(cacheKey);
+
+    if (!contextData) {
+      // Optimized: Add limits to prevent loading entire database on every chat message
+      const [kpi, inv, props, alerts, bookings] = await Promise.all([
+        prisma.kPI.findFirst(),
+        prisma.inventory.findMany({ take: 50, orderBy: { port: 'asc' } }), // Limit to 50 inventory items
+        prisma.proposal.findMany({
+          take: 20,
+          where: { status: { in: ['draft', 'pending'] } }, // Only load actionable proposals
+          orderBy: { createdAt: 'desc' }
+        }),
+        prisma.alert.findMany({
+          where: { status: "active" },
+          orderBy: { createdAt: "desc" },
+          take: 10 // Limit to 10 most recent alerts
+        }),
+        prisma.booking.findMany({ take: 10, orderBy: { date: "desc" } })
+      ]);
+
+      contextData = { kpi, inv, props, alerts, bookings };
+
+      // Cache for 60 seconds
+      await redisCache.set(cacheKey, contextData, 60);
+    }
+
+    const { kpi, inv, props, alerts, bookings } = contextData;
 
     const q = query.toLowerCase().trim();
 

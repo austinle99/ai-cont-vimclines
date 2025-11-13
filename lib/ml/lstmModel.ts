@@ -1,7 +1,9 @@
-import * as tf from '@tensorflow/tfjs';
 import { ProcessedTimeSeriesData } from './lstmPreprocessor';
 import * as fs from 'fs';
 import * as path from 'path';
+
+// Dynamic import type for TensorFlow.js
+type TensorFlowJS = typeof import('@tensorflow/tfjs');
 
 export interface LSTMModelConfig {
   sequenceLength: number;
@@ -30,9 +32,10 @@ export interface PredictionResult {
 }
 
 export class LSTMEmptyContainerModel {
-  private model: tf.LayersModel | null = null;
+  private model: any = null; // LayersModel type
   private config: LSTMModelConfig;
   private scalingParams: ProcessedTimeSeriesData['scalingParams'] | null = null;
+  private tf: TensorFlowJS | null = null;
 
   constructor(config: Partial<LSTMModelConfig> = {}) {
     this.config = {
@@ -49,9 +52,20 @@ export class LSTMEmptyContainerModel {
   }
 
   /**
+   * Initialize TensorFlow.js dynamically to reduce bundle size
+   */
+  private async initTensorFlow(): Promise<TensorFlowJS> {
+    if (!this.tf) {
+      this.tf = await import('@tensorflow/tfjs');
+    }
+    return this.tf;
+  }
+
+  /**
    * Build the LSTM model architecture
    */
-  buildModel(): tf.LayersModel {
+  async buildModel(): Promise<any> {
+    const tf = await this.initTensorFlow();
     const model = tf.sequential();
 
     // Input layer
@@ -106,9 +120,11 @@ export class LSTMEmptyContainerModel {
   async trainModel(
     processedData: ProcessedTimeSeriesData,
     onProgress?: (progress: TrainingProgress) => void
-  ): Promise<tf.History> {
+  ): Promise<any> {
+    const tf = await this.initTensorFlow();
+
     if (!this.model) {
-      this.buildModel();
+      await this.buildModel();
     }
 
     if (!this.model) {
@@ -135,7 +151,7 @@ export class LSTMEmptyContainerModel {
         shuffle: true,
         verbose: 0,
         callbacks: {
-          onEpochEnd: async (epoch, logs) => {
+          onEpochEnd: async (epoch: number, logs: any) => {
             if (onProgress) {
               onProgress({
                 epoch: epoch + 1,
@@ -170,6 +186,8 @@ export class LSTMEmptyContainerModel {
     inputSequences: number[][][],
     futureDays: number = 7
   ): Promise<PredictionResult> {
+    const tf = await this.initTensorFlow();
+
     if (!this.model) {
       throw new Error('Model not trained yet');
     }
@@ -186,10 +204,10 @@ export class LSTMEmptyContainerModel {
       // Create input tensor
       const inputTensor = tf.tensor3d(inputSequences);
 
-      let predictionTensor: tf.Tensor | null = null;
+      let predictionTensor: any = null;
       try {
         // Make prediction
-        predictionTensor = this.model!.predict(inputTensor) as tf.Tensor;
+        predictionTensor = this.model!.predict(inputTensor);
 
         // Extract data
         const predictionArray = await predictionTensor.data();
@@ -239,21 +257,23 @@ export class LSTMEmptyContainerModel {
     testFeatures: number[][][],
     testTargets: number[]
   ): Promise<{ loss: number; mae: number; mape: number }> {
+    const tf = await this.initTensorFlow();
+
     if (!this.model) {
       throw new Error('Model not trained yet');
     }
 
-    // Use tf.tidy for automatic cleanup
-    return await tf.tidy(async () => {
-      const xTest = tf.tensor3d(testFeatures);
-      const yTest = tf.tensor2d(testTargets, [testTargets.length, 1]);
+    // Create tensors
+    const xTest = tf.tensor3d(testFeatures);
+    const yTest = tf.tensor2d(testTargets, [testTargets.length, 1]);
 
-      const evaluation = this.model!.evaluate(xTest, yTest) as tf.Scalar[];
+    try {
+      const evaluation = this.model!.evaluate(xTest, yTest) as any[];
       const loss = await evaluation[0].data();
       const mae = await evaluation[1].data();
 
       // Calculate MAPE (Mean Absolute Percentage Error)
-      const predictions = this.model!.predict(xTest) as tf.Tensor2D;
+      const predictions = this.model!.predict(xTest) as any;
       const predData = await predictions.data();
       const testData = await yTest.data();
 
@@ -265,12 +285,19 @@ export class LSTMEmptyContainerModel {
       }
       const mape = (mapeSum / testData.length) * 100;
 
+      // Clean up
+      predictions.dispose();
+      evaluation.forEach((tensor: any) => tensor.dispose());
+
       return {
         loss: loss[0],
         mae: mae[0],
         mape
       };
-    });
+    } finally {
+      xTest.dispose();
+      yTest.dispose();
+    }
   }
 
   /**
@@ -310,6 +337,8 @@ export class LSTMEmptyContainerModel {
    * Load model from file system
    */
   async loadModel(modelName: string = 'lstm-empty-container-model'): Promise<void> {
+    const tf = await this.initTensorFlow();
+
     try {
       const modelPath = path.join(process.cwd(), 'models', 'lstm_empty_containers');
       const modelJsonPath = path.join(modelPath, 'model.json');
@@ -346,7 +375,7 @@ export class LSTMEmptyContainerModel {
     }
 
     let summary = '';
-    this.model.summary(undefined, undefined, (line) => {
+    this.model.summary(undefined, undefined, (line: string) => {
       summary += line + '\n';
     });
 

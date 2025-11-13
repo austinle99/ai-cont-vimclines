@@ -9,8 +9,10 @@ export async function GET() {
 
     // Dynamic import to avoid build-time issues
     const { prisma } = await import('@/lib/db');
-    
+
+    // Add pagination to prevent loading 10,000+ records
     const bookings = await prisma.booking.findMany({
+      take: 100, // Limit to 100 most recent bookings
       orderBy: [{ date: "desc" }]
     });
 

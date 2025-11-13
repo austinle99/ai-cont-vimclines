@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useCallback, memo } from "react";
 import { executeChatAction } from "@/app/action";
 
 type Message = {
@@ -8,14 +8,17 @@ type Message = {
   isAction?: boolean;
 };
 
-export default function Chatbot() {
-  const [msgs, setMsgs] = useState<Message[]>([
-    { role: "assistant", text: "🤖 **Trợ lý Container AI sẵn sàng!**\n\nTôi có thể hỗ trợ bạn:\n• Đề xuất thông minh sau khi import báo cáo\n• Thực hiện hành động trực tiếp (phê duyệt đề xuất, giải quyết cảnh báo)\n• Phân tích KPI, tồn kho và dữ liệu vận hành\n• Đưa ra khuyến nghị dựa trên ngữ cảnh\n\nGõ 'trợ giúp' để xem lệnh hoặc 'gợi ý' để nhận thông tin thông minh!" }
-  ]);
+const INITIAL_MESSAGE: Message = {
+  role: "assistant",
+  text: "🤖 **Trợ lý Container AI sẵn sàng!**\n\nTôi có thể hỗ trợ bạn:\n• Đề xuất thông minh sau khi import báo cáo\n• Thực hiện hành động trực tiếp (phê duyệt đề xuất, giải quyết cảnh báo)\n• Phân tích KPI, tồn kho và dữ liệu vận hành\n• Đưa ra khuyến nghị dựa trên ngữ cảnh\n\nGõ 'trợ giúp' để xem lệnh hoặc 'gợi ý' để nhận thông tin thông minh!"
+};
+
+function Chatbot() {
+  const [msgs, setMsgs] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  async function send() {
+  const send = useCallback(async () => {
     if (!input.trim() || isProcessing) return;
     
     const userMessage = input;
@@ -63,9 +66,20 @@ export default function Chatbot() {
         text: "❌ Xin lỗi, tôi gặp lỗi khi xử lý yêu cầu của bạn. Vui lòng thử lại." 
       }]);
     }
-    
+
     setIsProcessing(false);
-  }
+  }, [input, isProcessing]);
+
+  const handleSuggest = useCallback(() => setInput("gợi ý"), []);
+  const handleHelp = useCallback(() => setInput("trợ giúp"), []);
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setInput(e.target.value);
+  }, []);
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      send();
+    }
+  }, [send]);
 
   return (
     <div className="w-80 border-l border-neutral-800 flex flex-col">
@@ -100,30 +114,30 @@ export default function Chatbot() {
       </div>
       <div className="p-3 border-t border-neutral-800">
         <div className="flex gap-2 mb-2">
-          <button 
-            onClick={() => setInput("gợi ý")}
+          <button
+            onClick={handleSuggest}
             className="px-2 py-1 text-xs rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300"
           >
             💡 Gợi ý
           </button>
-          <button 
-            onClick={() => setInput("trợ giúp")}
+          <button
+            onClick={handleHelp}
             className="px-2 py-1 text-xs rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300"
           >
             📖 Trợ giúp
           </button>
         </div>
         <div className="flex gap-2">
-          <input 
+          <input
             className="flex-1 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm placeholder-neutral-500"
-            value={input} 
-            onChange={e => setInput(e.target.value)} 
-            onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
             placeholder="Hỏi về KPI, tồn kho, đề xuất..."
             disabled={isProcessing}
           />
-          <button 
-            onClick={send} 
+          <button
+            onClick={send}
             disabled={isProcessing || !input.trim()}
             className="px-4 py-2 rounded bg-green-600 hover:bg-green-500 disabled:bg-neutral-700 disabled:cursor-not-allowed text-sm font-medium"
           >
@@ -134,3 +148,6 @@ export default function Chatbot() {
     </div>
   );
 }
+
+// Wrap component in React.memo to prevent unnecessary re-renders
+export default memo(Chatbot);

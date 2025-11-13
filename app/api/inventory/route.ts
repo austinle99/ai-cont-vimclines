@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { redisCache, generateCacheKey } from '@/lib/cache/redisCache';
 
 export async function GET() {
   try {
@@ -7,12 +8,23 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    // Dynamic import to avoid build-time issues
-    const { prisma } = await import('@/lib/db');
-    
-    const inventory = await prisma.inventory.findMany({
-      orderBy: [{ port: "asc" }, { type: "asc" }]
-    });
+    // Try Redis cache first (TTL: 180 seconds = 3 minutes)
+    const cacheKey = generateCacheKey('inventory', {});
+    let inventory = await redisCache.get<any>(cacheKey);
+
+    if (!inventory) {
+      // Dynamic import to avoid build-time issues
+      const { prisma } = await import('@/lib/db');
+
+      inventory = await prisma.inventory.findMany({
+        orderBy: [{ port: "asc" }, { type: "asc" }]
+      });
+
+      // Cache for 3 minutes
+      if (inventory) {
+        await redisCache.set(cacheKey, inventory, 180);
+      }
+    }
 
     return NextResponse.json(inventory, {
       headers: {

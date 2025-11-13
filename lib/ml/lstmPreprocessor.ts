@@ -1,4 +1,5 @@
-import * as tf from '@tensorflow/tfjs';
+// Dynamic import type for TensorFlow.js
+type TensorFlowJS = typeof import('@tensorflow/tfjs');
 
 export interface TimeSeriesData {
   timestamp: Date;
@@ -227,13 +228,14 @@ export class LSTMDataPreprocessor {
   /**
    * Convert processed data to TensorFlow tensors
    */
-  createTensors(processedData: ProcessedTimeSeriesData): {
-    xTrain: tf.Tensor3D;
-    yTrain: tf.Tensor2D;
-  } {
+  async createTensors(processedData: ProcessedTimeSeriesData): Promise<{
+    xTrain: any;
+    yTrain: any;
+  }> {
+    const tf = await import('@tensorflow/tfjs');
     const xTrain = tf.tensor3d(processedData.features);
     const yTrain = tf.tensor2d(processedData.targets, [processedData.targets.length, 1]);
-    
+
     return { xTrain, yTrain };
   }
 

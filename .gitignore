@@ -45,15 +45,20 @@ models/**/scaling_params.json
 models/**/metadata.json
 
 # Documentation files (auto-generated summaries and internal docs)
-CLAUDE.md
 *_SUMMARY.md
 *_ROADMAP.md
-docs/*_GUIDE.md
 models/README.md
+
+# Ignore all generated documentation in docs folder except README.md
+docs/*.md
+docs/*.txt
+docs/**/*.md
+docs/**/*.txt
+!docs/README.md
 
 # Claude Code configuration
 .claude/
 
-# Keep these documentation files
+# Keep these documentation files in root
 !README.md
 !SYSTEM_REQUIREMENTS.md

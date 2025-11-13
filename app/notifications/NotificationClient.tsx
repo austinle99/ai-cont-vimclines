@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { resolveAlert, ignoreAlert } from "@/app/action";
 
 interface Alert {
@@ -15,9 +15,9 @@ interface Alert {
   resolvedAt?: Date | null;
 }
 
-export default function NotificationClient({ alerts }: { alerts: Alert[] }) {
+function NotificationClient({ alerts }: { alerts: Alert[] }) {
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
-  
+
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -36,21 +36,37 @@ export default function NotificationClient({ alerts }: { alerts: Alert[] }) {
     };
   }, [selectedAlert]);
 
-  const color = (lv: string) => lv === "Cao" ? "text-red-400" : lv === "TB" ? "text-yellow-400" : "text-neutral-300";
+  const color = useCallback((lv: string) =>
+    lv === "Cao" ? "text-red-400" : lv === "TB" ? "text-yellow-400" : "text-neutral-300"
+  , []);
 
-  const handleMoreInfo = (alert: Alert) => {
+  const handleMoreInfo = useCallback((alert: Alert) => {
     setSelectedAlert(alert);
-  };
+  }, []);
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     setSelectedAlert(null);
-  };
+  }, []);
 
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleBackdropClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
-      closeModal();
+      setSelectedAlert(null);
     }
-  };
+  }, []);
+
+  const handleResolve = useCallback(async (alertId: string) => {
+    const formData = new FormData();
+    formData.append('id', alertId);
+    await resolveAlert(formData);
+    window.location.reload();
+  }, []);
+
+  const handleIgnore = useCallback(async (alertId: string) => {
+    const formData = new FormData();
+    formData.append('id', alertId);
+    await ignoreAlert(formData);
+    window.location.reload();
+  }, []);
 
   return (
     <>
@@ -71,24 +87,14 @@ export default function NotificationClient({ alerts }: { alerts: Alert[] }) {
               >
                 More info
               </button>
-              <button 
-                onClick={async () => {
-                  const formData = new FormData();
-                  formData.append('id', a.id);
-                  await resolveAlert(formData);
-                  window.location.reload();
-                }}
+              <button
+                onClick={() => handleResolve(a.id)}
                 className="px-3 py-1 rounded bg-green-600 hover:bg-green-500"
               >
                 Resolve
               </button>
-              <button 
-                onClick={async () => {
-                  const formData = new FormData();
-                  formData.append('id', a.id);
-                  await ignoreAlert(formData);
-                  window.location.reload();
-                }}
+              <button
+                onClick={() => handleIgnore(a.id)}
                 className="px-3 py-1 rounded bg-neutral-600 hover:bg-neutral-500"
               >
                 Ignore
@@ -170,3 +176,6 @@ export default function NotificationClient({ alerts }: { alerts: Alert[] }) {
     </>
   );
 }
+
+// Wrap component in React.memo to prevent unnecessary re-renders
+export default memo(NotificationClient);

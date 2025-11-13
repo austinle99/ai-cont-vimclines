@@ -1,11 +1,21 @@
 import EnsembleServiceSingleton from '@/lib/ml/ensembleServiceSingleton';
-import { prisma } from '@/lib/db';
 import { NextRequest } from 'next/server';
 
 const isDev = process.env.NODE_ENV === 'development';
 
 export async function GET(req: NextRequest) {
   try {
+    // Check if we're in build time (no DATABASE_URL available)
+    if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('file:')) {
+      return Response.json({
+        success: false,
+        error: 'Database not available'
+      }, { status: 503 });
+    }
+
+    // Dynamic import to avoid build-time issues
+    const { prisma } = await import('@/lib/db');
+
     // Get forecast horizon from query params
     const url = new URL(req.url);
     const days = parseInt(url.searchParams.get('days') || '7');
