@@ -59,6 +59,9 @@ docs/**/*.txt
 # Claude Code configuration
 .claude/
 
+# Development secrets and internal features
+.dev/
+
 # Keep these documentation files in root
 !README.md
 !SYSTEM_REQUIREMENTS.md
