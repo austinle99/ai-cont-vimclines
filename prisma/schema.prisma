@@ -113,9 +113,166 @@ model SuggestionFeedback {
   timestamp    DateTime @default(now())
   context      Json?    // Additional context about the feedback
   notes        String?  // User notes about why they took this action
-  
+
   trainingData MLTrainingData @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
 
   @@index([suggestionId])
   @@index([action])
+}
+
+// iShip Integration and Longstay Analysis Models
+model ContainerTracking {
+  id                String   @id @default(cuid())
+  containerNo       String   @unique
+  containerType     String   // 20GP, 40GP, 40HC, etc.
+  emptyLaden        String   // 'empty' or 'laden'
+  currentLocation   String   // Depot/Port name
+  lastMovementDate  DateTime
+  firstSeenDate     DateTime @default(now())
+  dwellDays         Int      @default(0)
+
+  // iShip specific data
+  shipmentId        String?
+  billOfLading      String?
+  customerId        String?
+  customerName      String?
+  consignee         String?
+
+  // Movement history
+  movementHistory   Json?    // Array of movement records
+
+  // Status tracking
+  status            String   @default("active") // active, relocated, picked-up, longstay
+  lastUpdated       DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  // Relations
+  longstayAnalyses  LongstayAnalysis[]
+  ishipData         IShipData[]
+
+  @@index([containerNo])
+  @@index([emptyLaden])
+  @@index([currentLocation])
+  @@index([status])
+  @@index([dwellDays])
+  @@index([lastMovementDate])
+}
+
+model LongstayAnalysis {
+  id                    String   @id @default(cuid())
+  containerTrackingId   String
+  containerNo           String
+
+  // Analysis data
+  currentDwellDays      Int
+  predictedDwellDays    Int?     // ML prediction
+  longstayRiskScore     Float    // 0-100, probability of becoming longstay
+  riskLevel             String   // low, medium, high, critical
+
+  // Prediction factors
+  historicalPattern     Json?    // Historical dwell time patterns
+  seasonalFactors       Json?    // Seasonal influences
+  locationFactors       Json?    // Location-specific factors
+  demandFactors         Json?    // Demand/supply factors
+
+  // Recommendations
+  recommendedAction     String?  // relocate, monitor, urgent-pickup, etc.
+  suggestedDestination  String?
+  estimatedCost         Float?
+  potentialSavings      Float?
+
+  // Thresholds
+  longstayThreshold     Int      @default(14) // Days to be considered longstay
+  criticalThreshold     Int      @default(21) // Days to be critical
+
+  // Tracking
+  analysisDate          DateTime @default(now())
+  lastUpdated           DateTime @updatedAt
+  status                String   @default("active") // active, resolved, escalated
+
+  // Relations
+  containerTracking     ContainerTracking @relation(fields: [containerTrackingId], references: [id], onDelete: Cascade)
+
+  @@index([containerNo])
+  @@index([longstayRiskScore])
+  @@index([riskLevel])
+  @@index([currentDwellDays])
+  @@index([analysisDate])
+  @@index([status])
+}
+
+model IShipData {
+  id                  String   @id @default(cuid())
+  containerTrackingId String?
+
+  // Raw iShip data fields
+  containerNo         String
+  shipmentNo          String?
+  bookingNo           String?
+  billOfLading        String?
+
+  // Container details
+  containerType       String?
+  emptyLaden          String?
+  depot               String?
+
+  // Shipment info
+  origin              String?
+  destination         String?
+  shipper             String?
+  consignee           String?
+  commodity           String?
+
+  // Dates
+  gateInDate          DateTime?
+  gateOutDate         DateTime?
+  estimatedPickupDate DateTime?
+  actualPickupDate    DateTime?
+
+  // Status
+  currentStatus       String?
+  remarks             String?
+
+  // Scraping metadata
+  scrapedAt           DateTime @default(now())
+  sourceUrl           String?
+  dataHash            String?  // To detect duplicates
+
+  // Relations
+  containerTracking   ContainerTracking? @relation(fields: [containerTrackingId], references: [id])
+
+  @@index([containerNo])
+  @@index([scrapedAt])
+  @@index([depot])
+  @@index([currentStatus])
+  @@index([dataHash])
+}
+
+// Longstay ML Training Data
+model LongstayMLData {
+  id                String   @id @default(cuid())
+  containerNo       String
+
+  // Features for ML training
+  features          Json     // All engineered features
+  actualDwellDays   Int      // Actual outcome
+  predictedDwellDays Int?    // Model prediction
+  error             Float?   // Prediction error
+
+  // Context
+  containerType     String
+  location          String
+  seasonMonth       Int
+  weekOfYear        Int
+
+  // Model performance
+  modelVersion      String   @default("v1")
+  accuracy          Float?
+
+  createdAt         DateTime @default(now())
+
+  @@index([containerNo])
+  @@index([location])
+  @@index([createdAt])
+  @@index([modelVersion])
 }

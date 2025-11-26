@@ -1,5 +1,11 @@
+# Docker Compose - Optimized for High-Performance Workstation
+# Specs: 2x RTX 5080, 256GB RAM, Windows 11 Pro
+# Last updated: 2025-11-24
+
+version: '3.8'
+
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database - Optimized for 256GB RAM
   postgres:
     image: postgres:15-alpine
     container_name: ai-cont-postgres
@@ -8,62 +14,267 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-ai_cont_db}
+      # Performance tuning for 256GB RAM workstation
+      POSTGRES_SHARED_BUFFERS: 16GB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 48GB
+      POSTGRES_MAINTENANCE_WORK_MEM: 2GB
+      POSTGRES_CHECKPOINT_COMPLETION_TARGET: 0.9
+      POSTGRES_WAL_BUFFERS: 16MB
+      POSTGRES_DEFAULT_STATISTICS_TARGET: 100
+      POSTGRES_RANDOM_PAGE_COST: 1.1
+      POSTGRES_EFFECTIVE_IO_CONCURRENCY: 200
+      POSTGRES_WORK_MEM: 128MB
+      POSTGRES_MIN_WAL_SIZE: 2GB
+      POSTGRES_MAX_WAL_SIZE: 8GB
+      POSTGRES_MAX_WORKER_PROCESSES: 16
+      POSTGRES_MAX_PARALLEL_WORKERS_PER_GATHER: 8
+      POSTGRES_MAX_PARALLEL_WORKERS: 16
+      POSTGRES_MAX_PARALLEL_MAINTENANCE_WORKERS: 8
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d
+      - ./postgres-config:/etc/postgresql/conf.d:ro
+    # Shared memory for PostgreSQL (important for large datasets)
+    shm_size: 8gb
+    # Resource limits - Allow generous allocation
+    deploy:
+      resources:
+        limits:
+          memory: 32G        # 32GB max for Postgres
+          cpus: '16'         # Up to 16 CPU cores
+        reservations:
+          memory: 8G         # Reserve 8GB minimum
+          cpus: '4'          # Reserve 4 cores
+    # Health check
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 5
+      start_period: 30s
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
 
-  # Next.js Application
+  # Redis Cache - For caching predictions and API responses
+  redis:
+    image: redis:7-alpine
+    container_name: ai-cont-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 8gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --appendonly yes
+      --appendfsync everysec
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 10G
+          cpus: '4'
+        reservations:
+          memory: 2G
+          cpus: '1'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # Next.js Application - Optimized for high throughput
   app:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
     container_name: ai-cont-app
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ai_cont_db}"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ai_cont_db}?connection_limit=100&pool_timeout=60"
       DIRECT_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ai_cont_db}"
+
+      # Redis cache
+      REDIS_URL: "redis://redis:6379"
+      REDIS_ENABLED: "true"
+
+      # Node.js performance tuning
+      NODE_OPTIONS: "--max-old-space-size=8192 --max-http-header-size=16384"
+      UV_THREADPOOL_SIZE: 32
+
+      # Application settings
+      MAX_CONTAINERS_PER_REQUEST: 1000
+      CACHE_TTL_SECONDS: 300
+
+      # ML Settings
+      ENABLE_GPU: "false"  # Set to true when GPU support is added
+      ML_BATCH_SIZE: 100
+      ML_WORKER_THREADS: 8
+
+      # Logging
+      LOG_LEVEL: info
+
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./prisma:/app/prisma:ro
+      - ml_models:/app/models
+      - app_logs:/app/logs
+    # Resource limits - Generous for ML workloads
+    deploy:
+      resources:
+        limits:
+          memory: 16G       # 16GB for Node.js + ML models
+          cpus: '12'        # Up to 12 cores
+        reservations:
+          memory: 4G        # Reserve 4GB
+          cpus: '2'         # Reserve 2 cores
+    # Startup command
     command: >
       sh -c "
+        echo '🚀 Starting AI Container Optimization System...' &&
+        echo '📊 System Resources: 256GB RAM, 2x RTX 5080' &&
         npx prisma migrate deploy &&
-        npx prisma db seed &&
+        npx prisma generate &&
         node server.js
       "
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/performance"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200m"
+        max-file: "10"
 
-  # Optional: pgAdmin for database management
+  # pgAdmin - Database Management UI
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: ai-cont-pgadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
       PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: 'False'
+      PGADMIN_CONFIG_SERVER_MODE: 'True'
+      # Performance settings
+      GUNICORN_THREADS: 8
     ports:
       - "5050:80"
     depends_on:
       - postgres
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # Optional: Grafana for monitoring (uncomment to enable)
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: ai-cont-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     GF_SECURITY_ADMIN_USER: admin
+  #     GF_SECURITY_ADMIN_PASSWORD: admin
+  #     GF_INSTALL_PLUGINS: grafana-clock-panel
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1G
+  #         cpus: '2'
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "3"
+
+  # Optional: Prometheus for metrics (uncomment to enable)
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: ai-cont-prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--storage.tsdb.retention.time=30d'
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 4G
+  #         cpus: '4'
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "3"
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
   pgadmin_data:
+    driver: local
+  ml_models:
+    driver: local
+  app_logs:
+    driver: local
+  # grafana_data:
+  #   driver: local
+  # prometheus_data:
+  #   driver: local
 
 networks:
   default:
     name: ai-cont-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

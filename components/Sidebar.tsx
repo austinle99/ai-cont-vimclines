@@ -11,6 +11,7 @@ export default function Sidebar({ current }: { current: string }) {
     { id: "inventory", label: "Tồn kho", href: "/" },
     { id: "proposals", label: "Đề xuất", href: "/proposals" },
     { id: "predictions", label: "Dự đoán", href: "/predictions" },
+    { id: "longstay", label: "Longstay", href: "/longstay" },
     { id: "reports", label: "Báo cáo", href: "/reports" },
     { id: "notifications", label: "Noti", href: "/notifications" }
   ];
