@@ -45,6 +45,11 @@ coverage
 
 # Testing
 .nyc_output
+testing-scripts/
+**/*test*.js
+**/*test*.ts
+**/__tests__/
+**/test/
 
 # Misc
 .eslintcache

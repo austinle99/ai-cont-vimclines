@@ -276,8 +276,6 @@ curl "http://localhost:3000/api/predictions?days=7"
 curl "http://localhost:3000/api/predictions?days=7&port=VNHPH&type=20GP"
 ```
 
-For detailed implementation guide, see [NEXT_STEPS_ROADMAP.md](NEXT_STEPS_ROADMAP.md)
-
 ## 🤝 Contributing
 
 1. Fork the repository
